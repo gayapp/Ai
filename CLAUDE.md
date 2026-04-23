@@ -2,7 +2,7 @@
 
 ## 一句话
 
-基于 Cloudflare Workers 的统一 AI 审核中间平台。对接 Grok（文本）与 Gemini（视觉），服务公司内多个 C 端应用的 UGC 审核（评论/昵称/简介/头像）。对外固定 JSON 契约，对内 prompt 可热更新。
+基于 Cloudflare Workers 的统一 AI 审核中间平台。**定位：成人男同社交 APP 的审核中间层**——合法 NSFW 内容放行，仅对 CSAM / 广告引流 / 毒品 / 赌博 / 政治敏感零容忍。对接 Grok（文本）与 Gemini（视觉），服务多个成人 APP（当前：一起看）。对外固定 JSON 契约，对内 prompt 可热更新。
 
 ## 目录速查
 
@@ -19,9 +19,11 @@
 - [migrations/](migrations/) — D1 迁移；**只追加，不改历史**
 - [docs/04-callback-spec.md](docs/04-callback-spec.md) — ★ 对外契约，改动须走评审
 - [docs/apps/](docs/apps/) — 每个接入应用的专属对接文档
+- [docs/optimization/](docs/optimization/) — ★ 优化任务清单（prompt / 前置漏斗 / Batch API / 物理服务器）
 
 ## 铁律
 
+0. **平台定位：成人男同社交 APP 的审核中间层。** 合法 NSFW / 性暗示 / 裸露 / 男同色情 **绝不 reject**。仅对 CSAM（未成年性化）/ 广告引流 / 毒品 / 赌博 / 政治敏感 零容忍。编写 prompt 时必须明确这点，default prompt（migration 0001/0002）需走 P0.1 改写升级到 v3。
 1. **回调 JSON schema 是对外契约。** 新增字段必须向后兼容；不得删字段或改字段含义；变更必过 [docs/04-callback-spec.md](docs/04-callback-spec.md)。
 2. **Prompt 只决定"如何判断"，不决定"输出结构"。** 结构由 [src/moderation/schema.ts](src/moderation/schema.ts) 的 Zod 锁定；模型返回不合规，整条标 `status=error`。
 3. **去重 KV key 必须含 `prompt_version`。** 否则 prompt 更新后旧缓存会污染结果。key 格式：`{biz_type}:{prompt_version}:{content_hash}`。

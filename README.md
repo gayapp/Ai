@@ -57,6 +57,19 @@ scripts/      运维脚本（创建 app、轮换密钥等）
 ### 接入中的应用
 - [一起看](docs/apps/一起看-integration.md) · `app_f2ce7d84dec8ad56`
 
+### 优化路线图
+
+平台定位：**成人男同社交 APP 的审核中间层**。合法 NSFW 内容应放行，
+仅对 CSAM / 广告引流 / 毒品 / 赌博 / 政治敏感零容忍。
+
+详细任务清单（按优先级）：[docs/optimization/README.md](docs/optimization/README.md)
+
+关键待办：
+- 🔴 [P0.1 改写默认 prompt 匹配成人平台定位](docs/optimization/prompts-adult-platform.md)
+- 🔴 P0.2 Cloudflare 原生 CSAM 扫描集成
+- 🟡 [P1.1 边缘前置过滤漏斗](docs/optimization/edge-prefilter.md)（省 30-50% Token）
+- 🟡 [P1.3 物理服务器辅助](docs/optimization/physical-server.md)（可通过管理后台 toggle 启用）
+
 ## 状态
 
 MVP 已部署上线。dev + prod 环境均通过真实端到端验收：
