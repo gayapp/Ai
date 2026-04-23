@@ -41,20 +41,18 @@
 - **状态**：✅ prod + dev 已发布 v3；回归测试 19/19 全绿；成人 NSFW / CSAM / 广告 / 政治 / 毒品 / 赌博 / 男同文化所有场景覆盖正确
 - **详见**：[prompts-adult-platform.md](prompts-adult-platform.md)
 
-#### P0.2 · Cloudflare CSAM 扫描集成 · ⏱ 半天
-- **问题**：儿童色情的合规红线必须在头像/图片写入 R2 前阻断；当前依赖 Gemini Vision 的软判定不够硬
-- **做法**：启用 Cloudflare 内建 CSAM Scanning Tool，在头像写入 `ai-guard-evidence` R2 前做硬核对（NCMEC 哈希库）
-- **交付**：
-  - R2 bucket 开启 CSAM scanner（Dashboard 设置）
-  - 头像 pipeline 收到扫描命中时 → `status=reject, category=csam`，记录事件并自动触发 NCMEC 报告（Cloudflare 代办）
-  - 本地代码不处理任何 CSAM 数据
-- **评估**：合规刚需；Cloudflare 零额外成本，单点启用即可
+#### P0.2 · Cloudflare CSAM 扫描集成 · ⚠️ **待你手动启用** · ⏱ 5 分钟
+- **问题**：儿童色情合规红线必须在图片到 R2 后立刻二次硬判；当前单靠 Gemini Vision 软判不够稳
+- **做法**：Cloudflare Dashboard 里对 R2 evidence bucket 开启 CSAM Scanning Tool
+- **状态**：⚠️ **需要你在 Dashboard 操作** — 我的 API Token 没有此操作权限
+- **详细步骤**：[csam-scan-setup.md](csam-scan-setup.md)
+- **评估**：合规刚需；Cloudflare 原生、免费；启用后扫描 + 自动 NCMEC 报告均由 CF 代办
 
 ---
 
 ### 🟡 P1 — 近期做（成本优化 + 架构升级）
 
-#### P1.1 · 边缘前置过滤漏斗 · ⏱ 1 天
+#### P1.1 · 边缘前置过滤漏斗 · ✅ **已完成 2026-04-23**
 在 Worker 入口做 3 层廉价过滤，**在打模型前**拦掉 30-50% 的无效请求：
 
 1. **空/短内容快速放行**：
@@ -72,8 +70,15 @@
 3. **重复内容 SHA-256 查缓存**（当前有，但只在 pipeline 内部；要前移到 route 入口最早）
 
 详见 [edge-prefilter.md](edge-prefilter.md)。
-- **交付**：`src/moderation/prefilter.ts`，在 HMAC 校验通过后、provider 调用前执行；新增字段 `prefiltered_by` 进入 D1（观测用）
-- **预期收益**：Token 下降 30-50%，延迟下降 50%（命中前置即 < 50ms 返回）
+- **交付**：
+  - `src/moderation/prefilter.ts` — L1/L2 漏斗实现（8 条 L2 规则）
+  - `migration 0005_prefilter_tag.sql` — `prefiltered_by` 列
+  - `src/routes/moderate.ts` 接入：HMAC 后、recordPending 时一次性写 tag
+  - `admin/stats/summary` 返回 `funnel` 面板数据
+  - Admin UI Dashboard 加"前置漏斗命中"表（省 X% 模型调用）
+  - 单元测试 18 条，总计 44/44 通过
+- **线上验证**：14 条 E2E 覆盖 L1/L2 所有规则 + 合法内容不误伤，全通过
+- **实测延迟**：命中漏斗后 ~700-1000ms（含 D1 写 + KV nonce）；走模型 ~1800-2000ms
 
 #### P1.2 · Grok Batch API 异步通道 · ⏱ 1 天
 - **现状**：每条请求独占一次 API 调用，系统 prompt token 完全未均摊

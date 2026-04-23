@@ -127,6 +127,7 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
       mode: "async",
       extra: job.extra ?? null,
       callback_url: job.callback_url,
+      prefiltered_by: null,
     });
   }
 

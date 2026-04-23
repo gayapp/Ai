@@ -213,6 +213,7 @@ export interface ModerationRow {
   content_hash: string;
   content_text: string | null;
   evidence_key: string | null;
+  prefiltered_by: string | null;
   prompt_version: number | null;
   provider: string | null;
   model: string | null;
@@ -243,14 +244,15 @@ export interface RecordPendingArgs {
   mode: string;
   extra: Record<string, unknown> | null;
   callback_url: string | null;
+  prefiltered_by?: string | null;
 }
 
 export async function recordPending(db: D1Database, a: RecordPendingArgs): Promise<void> {
   await db
     .prepare(
       `INSERT INTO moderation_requests
-       (id, app_id, biz_type, biz_id, user_id, content_hash, content_text, mode, status, extra, callback_url, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+       (id, app_id, biz_type, biz_id, user_id, content_hash, content_text, mode, status, extra, callback_url, prefiltered_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
     )
     .bind(
       a.id,
@@ -263,6 +265,7 @@ export async function recordPending(db: D1Database, a: RecordPendingArgs): Promi
       a.mode,
       a.extra ? JSON.stringify(a.extra) : null,
       a.callback_url,
+      a.prefiltered_by ?? null,
       Date.now(),
     )
     .run();

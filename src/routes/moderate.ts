@@ -14,6 +14,7 @@ import {
   getDedup,
   putDedup,
 } from "../moderation/dedup.ts";
+import { applyPrefilter } from "../moderation/prefilter.ts";
 import { executeModeration } from "../moderation/pipeline.ts";
 import {
   recordCompleted,
@@ -53,7 +54,10 @@ moderateRouter.post("/v1/moderate", async (c) => {
   const contentHash = await computeContentHash(parsed.biz_type, parsed.content);
   const callbackUrl = parsed.callback_url ?? app.callback_url;
 
-  // Record pending
+  // ==== P1.1 前置漏斗：L1 低信噪 / L2 高置信广告 ====
+  const pf = applyPrefilter(parsed.biz_type, parsed.content);
+
+  // Record pending（含 prefilter tag，便于观测）
   await recordPending(c.env.DB, {
     id: requestId,
     app_id: app.id,
@@ -65,7 +69,38 @@ moderateRouter.post("/v1/moderate", async (c) => {
     mode: parsed.mode,
     extra: parsed.extra ?? null,
     callback_url: callbackUrl,
+    prefiltered_by: pf.tag,
   });
+
+  // 命中漏斗直接返回，不打模型、不查 dedup
+  if (pf.kind !== "skip" && pf.result) {
+    await recordCompleted(c.env.DB, {
+      id: requestId,
+      cached: false,
+      status: pf.result.status,
+      risk_level: pf.result.risk_level,
+      categories: pf.result.categories,
+      reason: pf.result.reason,
+      provider: pf.result.provider,
+      model: pf.result.model,
+      prompt_version: pf.result.prompt_version,
+      input_tokens: 0,
+      output_tokens: 0,
+      latency_ms: 0,
+      error_code: null,
+    });
+    return c.json({
+      request_id: requestId,
+      cached: false,
+      prefiltered_by: pf.tag,
+      result: {
+        status: pf.result.status,
+        risk_level: pf.result.risk_level,
+        categories: pf.result.categories,
+        reason: pf.result.reason,
+      },
+    });
+  }
 
   // Try dedup. Uses PRIMARY provider's active prompt_version for the key
   // (fallback results are still cacheable but keyed by primary's version —

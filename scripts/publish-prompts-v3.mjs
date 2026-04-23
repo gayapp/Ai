@@ -2,12 +2,14 @@
 /**
  * Publish prompts-v3 to either prod or dev via Admin API.
  *
- * Usage:
- *   AI_GUARD_BASE=https://aicenter-api.1.gay \
- *   AI_GUARD_ADMIN=<prod_admin_token> \
- *     node scripts/publish-prompts-v3.mjs
+ * Usage (publish all 7):
+ *   AI_GUARD_BASE=... AI_GUARD_ADMIN=... node scripts/publish-prompts-v3.mjs
  *
- * Each (biz_type, provider) gets version+=1 and becomes active.
+ * Selective publish (single biz_type):
+ *   node scripts/publish-prompts-v3.mjs nickname          # all providers for nickname
+ *   node scripts/publish-prompts-v3.mjs nickname grok     # just one pair
+ *
+ * Each call bumps (biz_type, provider) version+=1 and sets is_active.
  */
 
 import { readFileSync } from "node:fs";
@@ -24,7 +26,7 @@ if (!BASE || !ADMIN) {
   process.exit(1);
 }
 
-const PAIRS = [
+const ALL_PAIRS = [
   ["comment", "grok"],
   ["nickname", "grok"],
   ["bio", "grok"],
@@ -33,6 +35,17 @@ const PAIRS = [
   ["nickname", "gemini"],
   ["bio", "gemini"],
 ];
+
+const [, , argBiz, argProv] = process.argv;
+const PAIRS = ALL_PAIRS.filter(
+  ([b, p]) =>
+    (!argBiz || b === argBiz) &&
+    (!argProv || p === argProv),
+);
+if (PAIRS.length === 0) {
+  console.error(`No pairs matched filter biz=${argBiz} provider=${argProv}`);
+  process.exit(1);
+}
 
 async function publish(biz, prov) {
   const file = join(ROOT, "docs/optimization/prompts-v3", `${biz}-${prov}.md`);

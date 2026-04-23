@@ -56,6 +56,13 @@ export default function Dashboard() {
         </div>
       )}
 
+      {sum?.funnel && (
+        <div className="card">
+          <h3>前置漏斗命中</h3>
+          <FunnelBreakdown funnel={sum.funnel} total={sum.total} />
+        </div>
+      )}
+
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h3 style={{margin:0}}>最近 20 条请求</h3>
@@ -118,6 +125,44 @@ function StatusBar({ by }: { by: { pass: number; reject: number; review: number;
         <span><StatusPill v="reject" /> {by.reject}</span>
         <span><StatusPill v="error" /> {by.error}</span>
       </div>
+    </>
+  );
+}
+
+function FunnelBreakdown({ funnel, total }: { funnel: Record<string, number>; total: number }) {
+  const entries = Object.entries(funnel).sort((a, b) => b[1] - a[1]);
+  const modelCount = funnel["model"] ?? 0;
+  const preFilteredCount = total - modelCount;
+  const saved = total > 0 ? preFilteredCount / total : 0;
+  return (
+    <>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+        省下 <strong style={{ color: "var(--good)" }}>{(saved * 100).toFixed(1)}%</strong> 模型调用（{preFilteredCount} / {total}）
+      </div>
+      <table>
+        <thead>
+          <tr><th>漏斗层</th><th>类型</th><th>次数</th><th>占比</th></tr>
+        </thead>
+        <tbody>
+          {entries.map(([k, v]) => {
+            const isModel = k === "model";
+            const isLow = k === "low_signal";
+            const isAd = k.startsWith("ad:");
+            const kind = isModel ? "走模型"
+                       : isLow ? <span className="pill pass">L1 low_signal</span>
+                       : isAd ? <span className="pill reject">L2 {k.slice(3)}</span>
+                       : k;
+            return (
+              <tr key={k}>
+                <td>{isModel ? "-" : k}</td>
+                <td>{kind}</td>
+                <td className="monospace">{v}</td>
+                <td className="monospace">{((v / total) * 100).toFixed(1)}%</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </>
   );
 }

@@ -167,6 +167,7 @@ export interface SummaryData {
   by_status: { pass: number; reject: number; review: number; error: number };
   pass_rate: number;
   tokens: { input: number; output: number };
+  funnel?: Record<string, number>; // { model: N, low_signal: M, "ad:xxx": K }
 }
 
 export interface CallbackRow {

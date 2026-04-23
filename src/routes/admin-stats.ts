@@ -35,6 +35,21 @@ adminStatsRouter.get("/summary", async (c) => {
   const app_id = c.req.query("app_id") ?? undefined;
   const row = await summarize(c.env.DB, { app_id, from_ms, to_ms });
   const nonErr = row.count_total - row.count_error;
+
+  // Prefilter funnel breakdown
+  const prefilterRows = await c.env.DB.prepare(
+    `SELECT prefiltered_by, COUNT(*) AS n FROM moderation_requests
+     WHERE created_at >= ? AND created_at <= ?
+       ${app_id ? "AND app_id = ?" : ""}
+     GROUP BY prefiltered_by`,
+  )
+    .bind(...(app_id ? [from_ms, to_ms, app_id] : [from_ms, to_ms]))
+    .all<{ prefiltered_by: string | null; n: number }>();
+  const funnel: Record<string, number> = {};
+  for (const r of prefilterRows.results) {
+    funnel[r.prefiltered_by ?? "model"] = r.n;
+  }
+
   return c.json({
     from: new Date(from_ms).toISOString(),
     to: new Date(to_ms).toISOString(),
@@ -52,6 +67,7 @@ adminStatsRouter.get("/summary", async (c) => {
       input: row.input_tokens,
       output: row.output_tokens,
     },
+    funnel, // { model: N, low_signal: M, "ad:wechat_v_signal": K, ... }
   });
 });
 
@@ -79,6 +95,7 @@ adminStatsRouter.get("/requests", async (c) => {
       user_id: r.user_id,
       content_text: r.content_text,  // for inline preview
       evidence_key: r.evidence_key,  // for thumbnail
+      prefiltered_by: r.prefiltered_by,
       status: r.status,
       risk_level: r.risk_level,
       categories: r.categories ? JSON.parse(r.categories) : [],
@@ -107,6 +124,7 @@ adminStatsRouter.get("/requests/:id", async (c) => {
     content_text: row.content_text,
     content_hash: row.content_hash,
     evidence_key: row.evidence_key,
+    prefiltered_by: row.prefiltered_by,
     prompt_version: row.prompt_version,
     provider: row.provider,
     model: row.model,
