@@ -44,10 +44,10 @@ scripts/      运维脚本（创建 app、轮换密钥等）
 
 ## 在线访问
 
-- **Prod Worker**：<https://ai-guard.schetkovvlad.workers.dev>
+- **Prod**：<https://aicenter.gv.live>（自定义域名）/ <https://ai-guard.schetkovvlad.workers.dev>（默认）
   - 健康检查：`/health`
-  - **系统架构图**：[`/architecture`](https://ai-guard.schetkovvlad.workers.dev/architecture)
-- **Dev Worker**：<https://ai-guard-dev.schetkovvlad.workers.dev>
+  - **系统架构图**：[`/architecture`](https://aicenter.gv.live/architecture)
+- **Dev**：<https://ai-guard-dev.schetkovvlad.workers.dev>
 
 ## 状态
 

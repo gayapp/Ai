@@ -477,7 +477,11 @@ wrangler d1 execute ai-guard --remote --command \
 
 <div class="cards">
   <div class="card">
-    <div class="k">Prod Worker</div>
+    <div class="k">Prod（自定义域名）</div>
+    <div class="v"><a href="https://aicenter.gv.live" style="color:var(--accent)">https://aicenter.gv.live</a></div>
+  </div>
+  <div class="card">
+    <div class="k">Prod（默认 Workers 域）</div>
     <div class="v"><a href="https://ai-guard.schetkovvlad.workers.dev" style="color:var(--accent)">https://ai-guard.schetkovvlad.workers.dev</a></div>
   </div>
   <div class="card">
@@ -495,11 +499,12 @@ wrangler d1 execute ai-guard --remote --command \
 </div>
 
 <h3>10.1 状态快查</h3>
-<pre><code>GET  https://ai-guard.schetkovvlad.workers.dev/health
+<pre><code>GET  https://aicenter.gv.live/health
 → {"ok":true,"ts":"...","version":"0.1.0"}</code></pre>
 
-<h3>10.2 绑定自定义域名（可选）</h3>
-<p>在 Cloudflare Dashboard → Workers &amp; Pages → <code>ai-guard</code> → Settings → Triggers → Add Custom Domain，填如 <code>ai.example.com</code>。域名需已在该 CF 账户。</p>
+<h3>10.2 自定义域名</h3>
+<p>Prod 已绑定 <code>aicenter.gv.live</code>（zone: gv.live）。Cloudflare Workers Custom Domain 会自动签发 SSL 证书并管理 DNS / 路由，无需手动加 A/CNAME 记录。</p>
+<p>如需新增绑定：CF Dashboard → Workers &amp; Pages → <code>ai-guard</code> → Settings → Triggers → Add Custom Domain。</p>
 
 </section>
 
