@@ -4,6 +4,7 @@ import { verifyAdmin } from "../auth/hmac.ts";
 import {
   getModerationById,
   listModeration,
+  loadAppCached,
   summarize,
   topUsers,
 } from "../db/queries.ts";
@@ -148,12 +149,14 @@ adminStatsRouter.post("/requests/:id/replay", async (c) => {
   }
   const biz = BizType.parse(row.biz_type);
   const timeoutMs = parseInt(c.env.SYNC_TIMEOUT_MS || "10000", 10);
+  const app = await loadAppCached(c.env, row.app_id);
   const started = Date.now();
   const result = await executeModeration(c.env, {
     bizType: biz,
     content: row.content_text,
     isImage: biz === "avatar",
     timeoutMs,
+    strategy: app?.provider_strategy ?? "auto",
   });
   // Attach original result for side-by-side compare
   return c.json({

@@ -21,11 +21,14 @@ adminAppsRouter.use("*", async (c, next) => {
   await next();
 });
 
+const ProviderStrategyEnum = z.enum(["auto", "grok", "gemini", "round_robin"]);
+
 const CreateAppSchema = z.object({
   name: z.string().min(1).max(128),
   callback_url: z.string().url().optional(),
   biz_types: z.array(BizType).min(1),
   rate_limit_qps: z.number().int().min(1).max(10_000).optional(),
+  provider_strategy: ProviderStrategyEnum.optional(),
 });
 
 adminAppsRouter.post("/", async (c) => {
@@ -41,6 +44,7 @@ adminAppsRouter.post("/", async (c) => {
     biz_types: body.biz_types,
     rate_limit_qps: body.rate_limit_qps ?? defaultQps,
     disabled: false,
+    provider_strategy: body.provider_strategy ?? "auto",
   };
   await insertApp(c.env.DB, app);
   return c.json(
@@ -51,6 +55,7 @@ adminAppsRouter.post("/", async (c) => {
       callback_url: app.callback_url,
       biz_types: app.biz_types,
       rate_limit_qps: app.rate_limit_qps,
+      provider_strategy: app.provider_strategy,
       created_at: new Date().toISOString(),
     },
     201,
@@ -67,6 +72,7 @@ adminAppsRouter.get("/", async (c) => {
       biz_types: a.biz_types,
       rate_limit_qps: a.rate_limit_qps,
       disabled: a.disabled,
+      provider_strategy: a.provider_strategy,
     })),
   });
 });
@@ -81,6 +87,7 @@ adminAppsRouter.get("/:id", async (c) => {
     biz_types: app.biz_types,
     rate_limit_qps: app.rate_limit_qps,
     disabled: app.disabled,
+    provider_strategy: app.provider_strategy,
   });
 });
 
@@ -90,6 +97,7 @@ const PatchAppSchema = z.object({
   biz_types: z.array(BizType).min(1).optional(),
   rate_limit_qps: z.number().int().min(1).max(10_000).optional(),
   disabled: z.boolean().optional(),
+  provider_strategy: ProviderStrategyEnum.optional(),
 });
 
 adminAppsRouter.patch("/:id", async (c) => {
@@ -103,6 +111,7 @@ adminAppsRouter.patch("/:id", async (c) => {
     ...(body.biz_types !== undefined ? { biz_types: body.biz_types } : {}),
     ...(body.rate_limit_qps !== undefined ? { rate_limit_qps: body.rate_limit_qps } : {}),
     ...(body.disabled !== undefined ? { disabled: body.disabled } : {}),
+    ...(body.provider_strategy !== undefined ? { provider_strategy: body.provider_strategy } : {}),
   });
   await invalidateAppCache(c.env, id);
   return c.json({ ok: true });

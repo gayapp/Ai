@@ -215,15 +215,25 @@ CREATE TABLE stats_rollup (
 
 ## Provider Router
 
+默认路由（app.provider_strategy = `auto`）：
 ```
 biz_type → 主 provider → 备 provider
 comment  → grok        → gemini
 nickname → grok        → gemini
 bio      → grok        → gemini
-avatar   → gemini      → grok（仅文字描述，不理想；视情况留空）
+avatar   → gemini      → （无，Grok 没 Vision）
 ```
 
-**熔断**：provider 连续失败 3 次（60s 窗口）触发熔断 30s，自动切备。指标从 KV 读写以避免 D1 热点。
+**每个 app 可独立设置 `provider_strategy`**：
+
+| 策略 | 文本主 → 备 | 头像 |
+|------|-------------|------|
+| `auto` | grok → gemini | gemini |
+| `grok` | grok → gemini | gemini |
+| `gemini` | gemini → grok | gemini |
+| `round_robin` | 秒切：grok ⇄ gemini | gemini |
+
+**熔断**：provider 连续失败 5 次（60s 窗口）触发熔断 30s，自动切备。状态存 KV，跨边缘生效。
 
 ## 部署拓扑
 

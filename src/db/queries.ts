@@ -1,4 +1,4 @@
-import type { AppConfig } from "../moderation/types.ts";
+import type { AppConfig, ProviderStrategy } from "../moderation/types.ts";
 import type { BizType, Provider, Status } from "../moderation/schema.ts";
 
 // =============================================================
@@ -13,14 +13,15 @@ export interface AppRow {
   biz_types: string;
   rate_limit_qps: number;
   disabled: number;
+  provider_strategy: string;
   created_at: number;
 }
 
 export async function insertApp(db: D1Database, a: AppConfig): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO apps (id, name, secret, callback_url, biz_types, rate_limit_qps, disabled, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO apps (id, name, secret, callback_url, biz_types, rate_limit_qps, disabled, provider_strategy, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       a.id,
@@ -30,6 +31,7 @@ export async function insertApp(db: D1Database, a: AppConfig): Promise<void> {
       JSON.stringify(a.biz_types),
       a.rate_limit_qps,
       a.disabled ? 1 : 0,
+      a.provider_strategy,
       Date.now(),
     )
     .run();
@@ -54,7 +56,7 @@ export async function updateAppSecret(db: D1Database, id: string, secret: string
 export async function updateAppFields(
   db: D1Database,
   id: string,
-  fields: Partial<Pick<AppConfig, "name" | "callback_url" | "biz_types" | "rate_limit_qps" | "disabled">>,
+  fields: Partial<Pick<AppConfig, "name" | "callback_url" | "biz_types" | "rate_limit_qps" | "disabled" | "provider_strategy">>,
 ): Promise<void> {
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -78,12 +80,17 @@ export async function updateAppFields(
     sets.push("disabled = ?");
     vals.push(fields.disabled ? 1 : 0);
   }
+  if (fields.provider_strategy !== undefined) {
+    sets.push("provider_strategy = ?");
+    vals.push(fields.provider_strategy);
+  }
   if (sets.length === 0) return;
   vals.push(id);
   await db.prepare(`UPDATE apps SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
 }
 
 function rowToAppConfig(r: AppRow): AppConfig {
+  const strat = (r.provider_strategy || "auto") as ProviderStrategy;
   return {
     id: r.id,
     name: r.name,
@@ -92,6 +99,7 @@ function rowToAppConfig(r: AppRow): AppConfig {
     biz_types: JSON.parse(r.biz_types) as string[],
     rate_limit_qps: r.rate_limit_qps,
     disabled: !!r.disabled,
+    provider_strategy: (["auto","grok","gemini","round_robin"].includes(strat) ? strat : "auto") as ProviderStrategy,
   };
 }
 

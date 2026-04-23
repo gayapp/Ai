@@ -21,6 +21,9 @@
 | `secret` | `<通过安全渠道单独发你，不入仓库>` |
 | 启用业务类型 | `comment`, `nickname`, `bio`, `avatar` |
 | 速率限制 | `100 QPS` |
+| AI 策略 | `auto`（可在平台管理端改为 `grok` / `gemini` / `round_robin`） |
+
+> **AI 策略说明**：`auto` 下文本类走 Grok、头像走 Gemini；可随时在 Admin UI 的 Apps 页点"改"切换。头像因 Grok 不支持视觉始终走 Gemini。策略切换只影响后续请求，已有缓存结果不受影响。
 
 > 如果 secret 泄漏：由管理员在 Admin UI 点"轮换 secret"立即换发，或调 `POST /admin/apps/{app_id}/rotate-secret`。
 

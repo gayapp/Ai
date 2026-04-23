@@ -22,9 +22,21 @@ Authorization: Bearer <ADMIN_TOKEN>
   "name": "my-forum",
   "callback_url": "https://myapp.com/hooks/moderate",
   "biz_types": ["comment", "nickname", "bio"],
-  "rate_limit_qps": 100
+  "rate_limit_qps": 100,
+  "provider_strategy": "auto"
 }
 ```
+
+### `provider_strategy` 取值
+
+| 值 | 文本类走哪家 | 头像 | 说明 |
+|----|-------------|------|------|
+| `auto`（默认） | Grok | Gemini | 平台默认路由 |
+| `grok` | Grok | Gemini | 即使熔断也先尝试 Grok；失败走 Gemini 备份 |
+| `gemini` | Gemini | Gemini | 所有审核都用 Gemini；文本失败备 Grok |
+| `round_robin` | 每秒切换 | Gemini | 基于 `Date.now()/1000 % 2` 决定本次主 |
+
+> 说明：头像（avatar）因 Grok 无 Vision 能力，无论策略是什么都走 Gemini。策略只影响文本三类。
 
 **Response 201**
 ```json

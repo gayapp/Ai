@@ -7,9 +7,15 @@ export async function computeContentHash(bizType: BizType, content: string): Pro
   return sha256Hex(`${bizType}\n${normalized}`);
 }
 
-/** Dedup KV key MUST include prompt_version, so prompt changes auto-invalidate. */
-export function dedupKey(bizType: BizType, promptVersion: number, contentHash: string): string {
-  return `${bizType}:${promptVersion}:${contentHash}`;
+/** Dedup KV key MUST include prompt_version (prompt 改动自动失效) + provider
+ *  (避免 app 切换策略后拿到另一家的 cached 结果). */
+export function dedupKey(
+  bizType: BizType,
+  provider: string,
+  promptVersion: number,
+  contentHash: string,
+): string {
+  return `${bizType}:${provider}:${promptVersion}:${contentHash}`;
 }
 
 export async function getDedup(

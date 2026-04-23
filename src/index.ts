@@ -15,12 +15,13 @@ import {
 } from "./moderation/dedup.ts";
 import {
   loadActivePromptCached,
+  loadAppCached,
   recordCompleted,
   getModerationById,
   recordPending,
   setEvidenceKey,
 } from "./db/queries.ts";
-import { getRoute } from "./providers/router.ts";
+import { resolveRoute } from "./providers/router.ts";
 import { CachedResult } from "./moderation/schema.ts";
 import { processCallback } from "./callback/dispatcher.ts";
 import { saveAvatarEvidence } from "./evidence/r2.ts";
@@ -132,10 +133,14 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
   const isImage = job.biz_type === "avatar";
   const contentHash = existing?.content_hash ?? await computeContentHash(job.biz_type, job.content);
 
+  // Load app config to honor provider strategy
+  const app = await loadAppCached(env, job.app_id);
+  const strategy = app?.provider_strategy ?? "auto";
+
   // Dedup check (again — KV may have populated since request acceptance)
-  const route = getRoute(job.biz_type);
+  const route = resolveRoute(job.biz_type, strategy);
   const primaryPrompt = await loadActivePromptCached(env, job.biz_type, route.primary);
-  const kvKey = primaryPrompt ? dedupKey(job.biz_type, primaryPrompt.version, contentHash) : null;
+  const kvKey = primaryPrompt ? dedupKey(job.biz_type, route.primary, primaryPrompt.version, contentHash) : null;
   if (kvKey) {
     const cached = await getDedup(env.DEDUP_CACHE, kvKey);
     if (cached) {
@@ -166,6 +171,7 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
       content: job.content,
       isImage,
       timeoutMs: Math.max(timeoutMs, 25_000), // give async a bit more
+      strategy,
     });
     await recordCompleted(env.DB, {
       id: job.request_id,

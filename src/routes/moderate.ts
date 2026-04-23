@@ -22,7 +22,7 @@ import {
   loadActivePromptCached,
 } from "../db/queries.ts";
 import { uuidv7 } from "../lib/id.ts";
-import { getRoute } from "../providers/router.ts";
+import { resolveRoute } from "../providers/router.ts";
 
 export const moderateRouter = new Hono<{ Bindings: Env }>();
 
@@ -70,10 +70,10 @@ moderateRouter.post("/v1/moderate", async (c) => {
   // Try dedup. Uses PRIMARY provider's active prompt_version for the key
   // (fallback results are still cacheable but keyed by primary's version —
   // this is fine because primary is what "future identical requests" will try).
-  const route = getRoute(parsed.biz_type);
+  const route = resolveRoute(parsed.biz_type, app.provider_strategy);
   const primaryPrompt = await loadActivePromptCached(c.env, parsed.biz_type, route.primary);
   const kvKey = primaryPrompt
-    ? dedupKey(parsed.biz_type, primaryPrompt.version, contentHash)
+    ? dedupKey(parsed.biz_type, route.primary, primaryPrompt.version, contentHash)
     : null;
   if (kvKey) {
     const cached = await getDedup(c.env.DEDUP_CACHE, kvKey);
@@ -144,6 +144,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
       content: parsed.content,
       isImage,
       timeoutMs,
+      strategy: app.provider_strategy,
     });
   } catch (err) {
     if (err instanceof AppError && err.code === ErrorCodes.PROVIDER_TIMEOUT && parsed.mode === "auto") {

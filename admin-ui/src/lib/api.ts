@@ -74,6 +74,8 @@ export type Provider = "grok" | "gemini";
 export type Status = "pass" | "reject" | "review" | "error" | "pending";
 export type RiskLevel = "safe" | "low" | "medium" | "high";
 
+export type ProviderStrategy = "auto" | "grok" | "gemini" | "round_robin";
+
 export interface AppConfig {
   id: string;
   name: string;
@@ -81,6 +83,7 @@ export interface AppConfig {
   biz_types: string[];
   rate_limit_qps: number;
   disabled: boolean;
+  provider_strategy: ProviderStrategy;
 }
 
 export interface ModerationRow {
@@ -180,12 +183,25 @@ export interface CallbackRow {
 export const Apps = {
   list: () => api<{ items: AppConfig[] }>("/admin/apps"),
   get: (id: string) => api<AppConfig>(`/admin/apps/${id}`),
-  create: (body: { name: string; callback_url?: string; biz_types: string[]; rate_limit_qps?: number }) =>
+  create: (body: {
+    name: string;
+    callback_url?: string;
+    biz_types: string[];
+    rate_limit_qps?: number;
+    provider_strategy?: ProviderStrategy;
+  }) =>
     api<AppConfig & { secret: string; created_at: string }>("/admin/apps", {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  patch: (id: string, body: Partial<{ name: string; callback_url: string | null; biz_types: string[]; rate_limit_qps: number; disabled: boolean }>) =>
+  patch: (id: string, body: Partial<{
+    name: string;
+    callback_url: string | null;
+    biz_types: string[];
+    rate_limit_qps: number;
+    disabled: boolean;
+    provider_strategy: ProviderStrategy;
+  }>) =>
     api<{ ok: boolean }>(`/admin/apps/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),

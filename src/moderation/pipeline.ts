@@ -6,7 +6,8 @@ import {
   type ExecutionResult,
   type Provider,
 } from "./schema.ts";
-import { getAdapter, getRoute } from "../providers/router.ts";
+import type { ProviderStrategy } from "./types.ts";
+import { getAdapter, resolveRoute } from "../providers/router.ts";
 import { canTry, recordFailure, recordSuccess } from "../providers/circuit.ts";
 
 export interface ExecuteArgs {
@@ -14,6 +15,7 @@ export interface ExecuteArgs {
   content: string;
   isImage: boolean;
   timeoutMs: number;
+  strategy?: ProviderStrategy; // default 'auto'
 }
 
 /**
@@ -24,7 +26,7 @@ export async function executeModeration(
   env: Env,
   args: ExecuteArgs,
 ): Promise<ExecutionResult> {
-  const route = getRoute(args.bizType);
+  const route = resolveRoute(args.bizType, args.strategy ?? "auto");
   const primaryOpen = !(await canTry(env.NONCE, route.primary));
 
   // If primary circuit is open, skip straight to fallback (if any)

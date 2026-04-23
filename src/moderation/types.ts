@@ -1,5 +1,7 @@
 import type { BizType } from "./schema.ts";
 
+export type ProviderStrategy = "auto" | "grok" | "gemini" | "round_robin";
+
 export interface AppConfig {
   id: string;
   name: string;
@@ -8,6 +10,7 @@ export interface AppConfig {
   biz_types: string[];
   rate_limit_qps: number;
   disabled: boolean;
+  provider_strategy: ProviderStrategy;
 }
 
 /** Message body enqueued to MODERATION_QUEUE for async execution. */
