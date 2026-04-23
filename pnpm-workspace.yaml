@@ -1,3 +1,6 @@
+packages:
+  - "admin-ui"
+
 allowBuilds:
   esbuild: true
   workerd: true

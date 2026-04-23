@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import archHtml from "../docs/architecture.html";
 import { AppError, ErrorCodes } from "./lib/errors.ts";
+import { checkAndAlert, sendTelegramAlert } from "./alerts/telegram.ts";
 import { moderateRouter } from "./routes/moderate.ts";
 import { adminAppsRouter } from "./routes/admin-apps.ts";
 import { adminPromptsRouter } from "./routes/admin-prompts.ts";
@@ -27,6 +28,33 @@ import type { CallbackJob, ModerationJob } from "./moderation/types.ts";
 // HTTP router
 // ==========================================================
 const app = new Hono<{ Bindings: Env }>({ strict: false });
+
+// CORS for Admin UI (aicenter.gv.live) + public /v1 API
+app.use("*", async (c, next): Promise<Response | void> => {
+  const origin = c.req.header("origin");
+  const allowed = new Set([
+    "https://aicenter.gv.live",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+  ]);
+  const allowOrigin = origin && allowed.has(origin) ? origin : "";
+  if (allowOrigin) {
+    c.header("access-control-allow-origin", allowOrigin);
+    c.header("access-control-allow-credentials", "true");
+    c.header("vary", "origin");
+  }
+  if (c.req.method === "OPTIONS") {
+    c.header("access-control-allow-methods", "GET, POST, PATCH, DELETE, OPTIONS");
+    c.header(
+      "access-control-allow-headers",
+      "authorization, content-type, x-app-id, x-timestamp, x-nonce, x-signature",
+    );
+    c.header("access-control-max-age", "86400");
+    return c.body(null, 204);
+  }
+  await next();
+  return;
+});
 
 app.get("/", (c) => c.text("ai-guard — see /architecture\n"));
 app.get("/health", (c) =>
@@ -203,19 +231,56 @@ async function handleCallbackQueue(
 // ==========================================================
 // Scheduled (MVP: simple hourly KV cleanup — stats rollup to be added)
 // ==========================================================
-async function scheduled(_ev: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-  const cutoff = Date.now() - 90 * 24 * 3600 * 1000;
-  await env.DB.prepare(
-    `DELETE FROM moderation_requests WHERE created_at < ?`,
-  )
-    .bind(cutoff)
-    .run();
-  await env.DB.prepare(
-    `DELETE FROM callback_deliveries WHERE created_at < ?`,
-  )
-    .bind(cutoff)
-    .run();
+async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+  const cron = ev.cron;
+
+  // "5 0 * * *" — daily cleanup
+  if (cron === "5 0 * * *") {
+    const cutoff = Date.now() - 90 * 24 * 3600 * 1000;
+    await env.DB.prepare(`DELETE FROM moderation_requests WHERE created_at < ?`).bind(cutoff).run();
+    await env.DB.prepare(`DELETE FROM callback_deliveries WHERE created_at < ?`).bind(cutoff).run();
+    return;
+  }
+
+  // "*/5 * * * *" — periodic alert check
+  try {
+    const r = await checkAndAlert(env);
+    console.log("[scheduled] alert check:", r.checks.join(" | "), "fired:", r.fired.join(","));
+  } catch (e) {
+    console.warn("[scheduled] alert check failed", e);
+  }
 }
+
+// Expose a manual "test alert" endpoint for admins
+app.post("/admin/alerts/test", async (c) => {
+  const { verifyAdmin } = await import("./auth/hmac.ts");
+  verifyAdmin(c.env, c.req.raw.headers);
+  const ok = await sendTelegramAlert(
+    c.env,
+    {
+      title: "ai-guard · 告警自检",
+      level: "info",
+      lines: [
+        "这是一条手动触发的测试消息。",
+        "如果你收到此消息，说明 Telegram 告警已配置成功。",
+      ],
+      dedupKey: `test-${Math.floor(Date.now() / 60000)}`,
+    },
+    c.env.DEDUP_CACHE,
+  );
+  return c.json({
+    sent: ok,
+    bot_configured: !!c.env.TELEGRAM_BOT_TOKEN,
+    chat_configured: !!c.env.TELEGRAM_CHAT_ID,
+  });
+});
+
+app.post("/admin/alerts/check", async (c) => {
+  const { verifyAdmin } = await import("./auth/hmac.ts");
+  verifyAdmin(c.env, c.req.raw.headers);
+  const r = await checkAndAlert(c.env);
+  return c.json(r);
+});
 
 // ==========================================================
 // Worker export

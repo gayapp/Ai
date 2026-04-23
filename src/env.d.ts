@@ -17,6 +17,8 @@ declare global {
     GROK_API_KEY: string;
     GEMINI_API_KEY: string;
     ADMIN_TOKEN: string;
+    TELEGRAM_BOT_TOKEN?: string;
+    TELEGRAM_CHAT_ID?: string;
 
     SYNC_TIMEOUT_MS: string;
     DEDUP_TTL_SECONDS: string;
