@@ -1,6 +1,64 @@
-# P0.1 · 成人男同平台 Prompt 重写
+# P0.1 · 成人男同平台 Prompt 重写 · ✅ 已发布 v3 (2026-04-23)
 
 > 目标：把当前把"色情/性暗示"一律 reject 的默认 prompt 改写为允许合规 NSFW、只对 CSAM/广告/毒品/赌博/政治零容忍的版本。
+
+## ✅ 发布状态（2026-04-23）
+
+7 条 v3 prompt 已通过 Admin API 发布到 **prod + dev**，激活 active。
+
+| biz_type × provider | prod id | dev id |
+|---------------------|---------|--------|
+| comment × grok | 15 | 16 |
+| nickname × grok | 16 | 17 |
+| bio × grok | 17 | 18 |
+| avatar × gemini | 18 | 19 |
+| comment × gemini（备） | 19 | 20 |
+| nickname × gemini（备） | 20 | 21 |
+| bio × gemini（备） | 21 | 22 |
+
+**回归测试（prod）**：19 / 19 全绿。
+
+| 场景类别 | 用例数 | 通过 |
+|---------|--------|------|
+| 合法成人 NSFW（求约 / 性器官词 / 裸照描述 / 1/0 / 情欲表达） | 5 | 5 ✓ |
+| 红线（CSAM / 微信引流 / VX 变体 / 毒品 / 赌博 / 政治） | 6 | 6 ✓ |
+| 灰色地带（泛用脏字 / 自嘲） | 2 | 2 ✓ |
+| 昵称（男同标签 / 性暗示 / 广告） | 3 | 3 ✓ |
+| 简介（性偏好详述 / 外部引流 / 商业交易） | 3 | 3 ✓ |
+
+**Categories 映射**实测正确：CSAM → `porn`、广告 → `ad`、毒品/赌博 → `other`、政治 → `politics`。
+
+## 源文件
+
+- [prompts-v3/comment-grok.md](prompts-v3/comment-grok.md) · 632 字 · 主 prompt，基于用户提供的框架
+- [prompts-v3/nickname-grok.md](prompts-v3/nickname-grok.md) · 337 字
+- [prompts-v3/bio-grok.md](prompts-v3/bio-grok.md) · 585 字
+- [prompts-v3/avatar-gemini.md](prompts-v3/avatar-gemini.md) · 641 字
+- [prompts-v3/comment-gemini.md](prompts-v3/comment-gemini.md) · 精简备用
+- [prompts-v3/nickname-gemini.md](prompts-v3/nickname-gemini.md) · 精简备用
+- [prompts-v3/bio-gemini.md](prompts-v3/bio-gemini.md) · 精简备用
+
+## 重新发布
+
+改动 prompts-v3/*.md 后：
+
+```bash
+# prod
+AI_GUARD_BASE=https://aicenter-api.1.gay \
+AI_GUARD_ADMIN=<prod_admin_token> \
+  node scripts/publish-prompts-v3.mjs
+
+# dev
+AI_GUARD_BASE=https://ai-guard-dev.schetkovvlad.workers.dev \
+AI_GUARD_ADMIN=<dev_admin_token> \
+  node scripts/publish-prompts-v3.mjs
+```
+
+每次调用会发布 version+1 的新版本，旧版自动置为 inactive。不用改代码、不用重部署。
+
+旧版本可以通过 Admin UI → Prompts 页的"回滚到此"按钮快速回退。
+
+---
 
 ## 核心原则（写入每条 prompt 最显眼位置）
 

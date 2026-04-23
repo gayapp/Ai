@@ -34,11 +34,12 @@
 
 ### 🔴 P0 — 立即做（合规 / 业务正确性）
 
-#### P0.1 · 改写默认 prompt 匹配成人男同平台定位 · ⏱ 1h
+#### P0.1 · 改写默认 prompt 匹配成人男同平台定位 · ✅ **已完成 2026-04-23**
 - **问题**：migration 0002 的 prompt 把"露骨性描写/性邀约/色情资源"一律 reject → 成人男同内容大面积误伤
-- **做法**：按文档第五部分的系统指令规范改写。详见 [prompts-adult-platform.md](prompts-adult-platform.md)
-- **交付**：migration 0005，4 个 biz_type × 2 provider = 8 条 v3 prompt，激活后自动失效旧缓存（key 含 prompt_version）
-- **评估**：prompt 热更，零部署，立即生效
+- **做法**：用户提供 comment prompt 框架；按同风格写 nickname/bio/avatar + 各 gemini 备用，共 7 条
+- **交付**：prompts-v3/*.md + `scripts/publish-prompts-v3.mjs` 发布脚本
+- **状态**：✅ prod + dev 已发布 v3；回归测试 19/19 全绿；成人 NSFW / CSAM / 广告 / 政治 / 毒品 / 赌博 / 男同文化所有场景覆盖正确
+- **详见**：[prompts-adult-platform.md](prompts-adult-platform.md)
 
 #### P0.2 · Cloudflare CSAM 扫描集成 · ⏱ 半天
 - **问题**：儿童色情的合规红线必须在头像/图片写入 R2 前阻断；当前依赖 Gemini Vision 的软判定不够硬
