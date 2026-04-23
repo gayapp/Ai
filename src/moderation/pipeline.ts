@@ -7,6 +7,7 @@ import {
   type Provider,
 } from "./schema.ts";
 import { getAdapter, getRoute } from "../providers/router.ts";
+import { canTry, recordFailure, recordSuccess } from "../providers/circuit.ts";
 
 export interface ExecuteArgs {
   bizType: BizType;
@@ -24,8 +25,16 @@ export async function executeModeration(
   args: ExecuteArgs,
 ): Promise<ExecutionResult> {
   const route = getRoute(args.bizType);
+  const primaryOpen = !(await canTry(env.NONCE, route.primary));
+
+  // If primary circuit is open, skip straight to fallback (if any)
+  if (primaryOpen && route.fallback) {
+    console.warn(`[pipeline] ${route.primary} circuit open, going fallback ${route.fallback}`);
+    return await tryProvider(env, args, route.fallback, false);
+  }
+
   try {
-    return await callProvider(env, args, route.primary);
+    return await tryProvider(env, args, route.primary, true);
   } catch (err) {
     if (!route.fallback) throw err;
     if (!(err instanceof AppError)) throw err;
@@ -38,7 +47,29 @@ export async function executeModeration(
     console.warn(
       `[pipeline] primary ${route.primary} failed (${err.code}); falling back to ${route.fallback}`,
     );
-    return await callProvider(env, args, route.fallback);
+    return await tryProvider(env, args, route.fallback, false);
+  }
+}
+
+async function tryProvider(
+  env: Env,
+  args: ExecuteArgs,
+  provider: Provider,
+  recordCircuit: boolean,
+): Promise<ExecutionResult> {
+  try {
+    const r = await callProvider(env, args, provider);
+    if (recordCircuit && r.status !== "error") {
+      // schema errors don't indicate provider outage — only close on real success
+      await recordSuccess(env.NONCE, provider);
+    }
+    return r;
+  } catch (err) {
+    if (recordCircuit && err instanceof AppError &&
+        (err.code === ErrorCodes.PROVIDER_ERROR || err.code === ErrorCodes.PROVIDER_TIMEOUT)) {
+      await recordFailure(env.NONCE, provider);
+    }
+    throw err;
   }
 }
 

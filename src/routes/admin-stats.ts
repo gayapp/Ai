@@ -8,11 +8,13 @@ import {
   topUsers,
 } from "../db/queries.ts";
 import { BizType, Status } from "../moderation/schema.ts";
+import { executeModeration } from "../moderation/pipeline.ts";
+import { readEvidence } from "../evidence/r2.ts";
 
 export const adminStatsRouter = new Hono<{ Bindings: Env }>({ strict: false });
 
 adminStatsRouter.use("*", async (c, next) => {
-  verifyAdmin(c.env, c.req.raw.headers);
+  verifyAdmin(c.env, c.req.raw.headers, new URL(c.req.url));
   await next();
 });
 
@@ -57,21 +59,25 @@ adminStatsRouter.get("/requests", async (c) => {
   const bizParam = c.req.query("biz_type");
   const statusParam = c.req.query("status");
   const limit = parseInt(c.req.query("limit") ?? "50", 10);
-  const rows = await listModeration(c.env.DB, {
+  const cursor = c.req.query("cursor") ?? undefined;
+  const { items, nextCursor } = await listModeration(c.env.DB, {
     app_id: c.req.query("app_id"),
     biz_type: bizParam ? BizType.parse(bizParam) : undefined,
     status: statusParam ? Status.parse(statusParam) : undefined,
     from_ms,
     to_ms,
     limit,
+    cursor,
   });
   return c.json({
-    items: rows.map((r) => ({
+    items: items.map((r) => ({
       id: r.id,
       app_id: r.app_id,
       biz_type: r.biz_type,
       biz_id: r.biz_id,
       user_id: r.user_id,
+      content_text: r.content_text,  // for inline preview
+      evidence_key: r.evidence_key,  // for thumbnail
       status: r.status,
       risk_level: r.risk_level,
       categories: r.categories ? JSON.parse(r.categories) : [],
@@ -83,6 +89,7 @@ adminStatsRouter.get("/requests", async (c) => {
       latency_ms: r.latency_ms ?? 0,
       created_at: new Date(r.created_at).toISOString(),
     })),
+    next_cursor: nextCursor,
   });
 });
 
@@ -96,7 +103,9 @@ adminStatsRouter.get("/requests/:id", async (c) => {
     biz_type: row.biz_type,
     biz_id: row.biz_id,
     user_id: row.user_id,
+    content_text: row.content_text,
     content_hash: row.content_hash,
+    evidence_key: row.evidence_key,
     prompt_version: row.prompt_version,
     provider: row.provider,
     model: row.model,
@@ -113,6 +122,64 @@ adminStatsRouter.get("/requests/:id", async (c) => {
     callback_url: row.callback_url,
     created_at: new Date(row.created_at).toISOString(),
     completed_at: row.completed_at ? new Date(row.completed_at).toISOString() : null,
+  });
+});
+
+// Stream R2 evidence — admin-only. Uses query ?token=... because <img src>
+// can't easily carry Authorization header. Token is validated once and not
+// stored; prefer short-lived access via this same-origin endpoint.
+adminStatsRouter.get("/evidence/:request_id", async (c) => {
+  const row = await getModerationById(c.env.DB, c.req.param("request_id"));
+  if (!row || !row.evidence_key) {
+    throw new AppError(ErrorCodes.NOT_FOUND, 404, "no evidence");
+  }
+  return readEvidence(c.env.EVIDENCE, row.evidence_key);
+});
+
+// Replay — re-run moderation with current active prompt (non-destructive).
+// Does NOT write to D1; result is returned inline. Use this to evaluate
+// prompt changes against historical data.
+adminStatsRouter.post("/requests/:id/replay", async (c) => {
+  const id = c.req.param("id");
+  const row = await getModerationById(c.env.DB, id);
+  if (!row) throw new AppError(ErrorCodes.NOT_FOUND, 404, "request not found");
+  if (!row.content_text) {
+    throw new AppError(ErrorCodes.INVALID_REQUEST, 400, "content_text missing (pre-migration row)");
+  }
+  const biz = BizType.parse(row.biz_type);
+  const timeoutMs = parseInt(c.env.SYNC_TIMEOUT_MS || "10000", 10);
+  const started = Date.now();
+  const result = await executeModeration(c.env, {
+    bizType: biz,
+    content: row.content_text,
+    isImage: biz === "avatar",
+    timeoutMs,
+  });
+  // Attach original result for side-by-side compare
+  return c.json({
+    original: {
+      status: row.status,
+      risk_level: row.risk_level,
+      categories: row.categories ? JSON.parse(row.categories) : [],
+      reason: row.reason,
+      provider: row.provider,
+      model: row.model,
+      prompt_version: row.prompt_version,
+      latency_ms: row.latency_ms ?? 0,
+    },
+    replayed: {
+      status: result.status,
+      risk_level: result.risk_level,
+      categories: result.categories,
+      reason: result.reason,
+      provider: result.provider,
+      model: result.model,
+      prompt_version: result.prompt_version,
+      latency_ms: Date.now() - started,
+      tokens: { input: result.input_tokens, output: result.output_tokens },
+      error_code: result.error_code ?? null,
+    },
+    changed: row.status !== result.status,
   });
 });
 

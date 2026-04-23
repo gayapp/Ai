@@ -14,6 +14,8 @@ declare global {
     MODERATION_QUEUE: Queue<ModerationJob>;
     CALLBACK_QUEUE: Queue<CallbackJob>;
 
+    EVIDENCE: R2Bucket;
+
     GROK_API_KEY: string;
     GEMINI_API_KEY: string;
     ADMIN_TOKEN: string;

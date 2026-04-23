@@ -36,6 +36,11 @@ id = "ded80f8b3acf4cc5b13d482a7e844b50"
 binding = "NONCE"
 id = "d238b6289c104643918c6a73e43e35c7"
 
+# === R2 (evidence storage for avatar moderation) ===
+[[r2_buckets]]
+binding = "EVIDENCE"
+bucket_name = "ai-guard-evidence"
+
 # === Queues ===
 [[queues.producers]]
 binding = "MODERATION_QUEUE"
@@ -104,6 +109,10 @@ id = "de87f0040ed14194a3c3536feacfa080"
 [[env.dev.kv_namespaces]]
 binding = "NONCE"
 id = "f0cf9dc5e5664005bbf18003547ccac6"
+
+[[env.dev.r2_buckets]]
+binding = "EVIDENCE"
+bucket_name = "ai-guard-dev-evidence"
 
 [[env.dev.queues.producers]]
 binding = "MODERATION_QUEUE"

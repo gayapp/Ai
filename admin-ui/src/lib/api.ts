@@ -89,6 +89,8 @@ export interface ModerationRow {
   biz_type: string;
   biz_id: string;
   user_id: string | null;
+  content_text?: string | null;
+  evidence_key?: string | null;
   status: Status;
   risk_level: RiskLevel | null;
   categories: string[];
@@ -99,6 +101,47 @@ export interface ModerationRow {
   tokens: { input: number; output: number };
   latency_ms: number;
   created_at: string;
+}
+
+export interface ModerationDetail extends ModerationRow {
+  content_hash: string;
+  prompt_version: number | null;
+  mode: string;
+  error_code: string | null;
+  extra: Record<string, unknown> | null;
+  callback_url: string | null;
+  completed_at: string | null;
+}
+
+export interface ReplayResult {
+  original: {
+    status: string;
+    risk_level: string | null;
+    categories: string[];
+    reason: string;
+    provider: string | null;
+    model: string | null;
+    prompt_version: number | null;
+    latency_ms: number;
+  };
+  replayed: {
+    status: string;
+    risk_level: string | null;
+    categories: string[];
+    reason: string;
+    provider: string | null;
+    model: string | null;
+    prompt_version: number | null;
+    latency_ms: number;
+    tokens: { input: number; output: number };
+    error_code: string | null;
+  };
+  changed: boolean;
+}
+
+export function evidenceUrl(requestId: string): string {
+  const t = getToken() ?? "";
+  return `${getApiBase()}/admin/stats/evidence/${encodeURIComponent(requestId)}?token=${encodeURIComponent(t)}`;
 }
 
 export interface PromptRow {
@@ -172,8 +215,10 @@ export const Stats = {
     from?: string;
     to?: string;
     limit?: number;
-  } = {}) => api<{ items: ModerationRow[] }>(`/admin/stats/requests${qs(q)}`),
-  request: (id: string) => api<ModerationRow & { prompt_version: number | null; error_code: string | null; extra: unknown; callback_url: string | null; content_hash: string; completed_at: string | null; mode: string; }>(`/admin/stats/requests/${id}`),
+    cursor?: string;
+  } = {}) => api<{ items: ModerationRow[]; next_cursor: string | null }>(`/admin/stats/requests${qs(q)}`),
+  request: (id: string) => api<ModerationDetail>(`/admin/stats/requests/${id}`),
+  replay: (id: string) => api<ReplayResult>(`/admin/stats/requests/${id}/replay`, { method: "POST" }),
   callbacks: (q: { limit?: number; failed?: string } = {}) =>
     api<{ items: CallbackRow[] }>(`/admin/stats/callbacks${qs(q)}`),
   topUsers: (q: { app_id: string; limit?: number; from?: string; to?: string }) =>

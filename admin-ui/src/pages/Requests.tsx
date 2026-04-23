@@ -12,14 +12,16 @@ export default function RequestsPage() {
   const [status, setStatus] = useState("");
   const [limit, setLimit] = useState(100);
   const [items, setItems] = useState<ModerationRow[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => { Apps.list().then(r => setApps(r.items)).catch(() => {}); }, []);
   useEffect(() => { load(); }, [appId, biz, status, limit]);
 
   async function load() {
-    setErr(null); setLoading(true);
+    setErr(null); setLoading(true); setCursor(null);
     try {
       const r = await Stats.requests({
         app_id: appId || undefined,
@@ -28,8 +30,26 @@ export default function RequestsPage() {
         limit,
       });
       setItems(r.items);
+      setCursor(r.next_cursor);
     } catch (e) { setErr(String(e)); }
     finally { setLoading(false); }
+  }
+
+  async function loadMore() {
+    if (!cursor || loadingMore) return;
+    setErr(null); setLoadingMore(true);
+    try {
+      const r = await Stats.requests({
+        app_id: appId || undefined,
+        biz_type: biz || undefined,
+        status: status || undefined,
+        limit,
+        cursor,
+      });
+      setItems(prev => [...prev, ...r.items]);
+      setCursor(r.next_cursor);
+    } catch (e) { setErr(String(e)); }
+    finally { setLoadingMore(false); }
   }
 
   return (
@@ -81,6 +101,18 @@ export default function RequestsPage() {
             {!loading && items.map(r => <RequestRow key={r.id} r={r} />)}
           </tbody>
         </table>
+        {!loading && cursor && (
+          <div style={{ textAlign: "center", padding: "16px 0" }}>
+            <button className="btn secondary" disabled={loadingMore} onClick={loadMore}>
+              {loadingMore ? "加载中…" : "加载更多（当前已展示 " + items.length + " 条）"}
+            </button>
+          </div>
+        )}
+        {!loading && !cursor && items.length > 0 && (
+          <div style={{ textAlign: "center", padding: "12px 0", color: "var(--muted)", fontSize: 12 }}>
+            已到末尾（共 {items.length} 条）
+          </div>
+        )}
       </div>
     </>
   );

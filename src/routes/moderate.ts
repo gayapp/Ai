@@ -61,6 +61,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
     biz_id: parsed.biz_id,
     user_id: parsed.user_id ?? null,
     content_hash: contentHash,
+    content_text: parsed.content,
     mode: parsed.mode,
     extra: parsed.extra ?? null,
     callback_url: callbackUrl,

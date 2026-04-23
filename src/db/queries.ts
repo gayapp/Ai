@@ -203,6 +203,8 @@ export interface ModerationRow {
   biz_id: string;
   user_id: string | null;
   content_hash: string;
+  content_text: string | null;
+  evidence_key: string | null;
   prompt_version: number | null;
   provider: string | null;
   model: string | null;
@@ -229,6 +231,7 @@ export interface RecordPendingArgs {
   biz_id: string;
   user_id: string | null;
   content_hash: string;
+  content_text: string;
   mode: string;
   extra: Record<string, unknown> | null;
   callback_url: string | null;
@@ -238,8 +241,8 @@ export async function recordPending(db: D1Database, a: RecordPendingArgs): Promi
   await db
     .prepare(
       `INSERT INTO moderation_requests
-       (id, app_id, biz_type, biz_id, user_id, content_hash, mode, status, extra, callback_url, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+       (id, app_id, biz_type, biz_id, user_id, content_hash, content_text, mode, status, extra, callback_url, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
     )
     .bind(
       a.id,
@@ -248,12 +251,17 @@ export async function recordPending(db: D1Database, a: RecordPendingArgs): Promi
       a.biz_id,
       a.user_id,
       a.content_hash,
+      a.content_text,
       a.mode,
       a.extra ? JSON.stringify(a.extra) : null,
       a.callback_url,
       Date.now(),
     )
     .run();
+}
+
+export async function setEvidenceKey(db: D1Database, id: string, key: string): Promise<void> {
+  await db.prepare(`UPDATE moderation_requests SET evidence_key = ? WHERE id = ?`).bind(key, id).run();
 }
 
 export interface RecordCompletedArgs {
@@ -320,8 +328,9 @@ export async function listModeration(
     from_ms?: number;
     to_ms?: number;
     limit?: number;
+    cursor?: string;   // id from previous page's last row (UUIDv7 - time-sortable)
   },
-): Promise<ModerationRow[]> {
+): Promise<{ items: ModerationRow[]; nextCursor: string | null }> {
   const where: string[] = [];
   const vals: unknown[] = [];
   if (opts.app_id) {
@@ -344,16 +353,25 @@ export async function listModeration(
     where.push("created_at <= ?");
     vals.push(opts.to_ms);
   }
+  // Cursor uses id for stable pagination (UUIDv7 is time-sortable).
+  if (opts.cursor) {
+    where.push("id < ?");
+    vals.push(opts.cursor);
+  }
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
   const sql =
     `SELECT * FROM moderation_requests` +
     (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
-    ` ORDER BY created_at DESC LIMIT ?`;
-  vals.push(Math.min(Math.max(opts.limit ?? 50, 1), 500));
+    ` ORDER BY id DESC LIMIT ?`;
+  vals.push(limit + 1); // fetch one extra to know if more exists
   const { results } = await db
     .prepare(sql)
     .bind(...vals)
     .all<ModerationRow>();
-  return results;
+  const hasMore = results.length > limit;
+  const items = hasMore ? results.slice(0, limit) : results;
+  const nextCursor = hasMore ? (items[items.length - 1]?.id ?? null) : null;
+  return { items, nextCursor };
 }
 
 // =============================================================

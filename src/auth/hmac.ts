@@ -53,22 +53,27 @@ export async function verifyAppRequest(
   return app;
 }
 
-/** Verifies the admin token for /admin/* routes. */
-export function verifyAdmin(env: Env, headers: Headers): void {
-  const authz = headers.get("authorization");
+/** Verifies the admin token for /admin/* routes.
+ *  Accepts either `Authorization: Bearer <token>` header (primary) or
+ *  `?token=<token>` query param (for <img src> use on same-origin pages).
+ */
+export function verifyAdmin(env: Env, headers: Headers, url?: URL): void {
   const expected = env.ADMIN_TOKEN;
   if (!expected) {
-    throw new AppError(
-      ErrorCodes.INTERNAL,
-      500,
-      "ADMIN_TOKEN not configured",
-    );
+    throw new AppError(ErrorCodes.INTERNAL, 500, "ADMIN_TOKEN not configured");
   }
+  let token: string | null = null;
+  const authz = headers.get("authorization");
   const prefix = "Bearer ";
-  if (!authz || !authz.startsWith(prefix)) {
+  if (authz && authz.startsWith(prefix)) {
+    token = authz.slice(prefix.length);
+  } else if (url) {
+    const q = url.searchParams.get("token");
+    if (q) token = q;
+  }
+  if (!token) {
     throw new AppError(ErrorCodes.UNAUTHORIZED, 401, "missing bearer token");
   }
-  const token = authz.slice(prefix.length);
   if (token.length !== expected.length) {
     throw new AppError(ErrorCodes.UNAUTHORIZED, 401, "bad admin token");
   }

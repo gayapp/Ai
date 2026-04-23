@@ -18,10 +18,13 @@ import {
   recordCompleted,
   getModerationById,
   recordPending,
+  setEvidenceKey,
 } from "./db/queries.ts";
 import { getRoute } from "./providers/router.ts";
 import { CachedResult } from "./moderation/schema.ts";
 import { processCallback } from "./callback/dispatcher.ts";
+import { saveAvatarEvidence } from "./evidence/r2.ts";
+import { rollupYesterday } from "./stats/rollup.ts";
 import type { CallbackJob, ModerationJob } from "./moderation/types.ts";
 
 // ==========================================================
@@ -119,6 +122,7 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
       biz_id: job.biz_id,
       user_id: job.user_id,
       content_hash: await computeContentHash(job.biz_type, job.content),
+      content_text: job.content,
       mode: "async",
       extra: job.extra ?? null,
       callback_url: job.callback_url,
@@ -191,6 +195,11 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
       const ttl = parseInt(env.DEDUP_TTL_SECONDS || "604800", 10);
       await putDedup(env.DEDUP_CACHE, kvKey, cacheable, ttl);
     }
+    // Best-effort: save avatar evidence to R2 (non-cached, non-error audits only)
+    if (isImage && !existing?.evidence_key && result.status !== "error") {
+      const ev = await saveAvatarEvidence(env.EVIDENCE, job.request_id, job.content);
+      if (ev) await setEvidenceKey(env.DB, job.request_id, ev.key);
+    }
   } catch (e) {
     const code = e instanceof AppError ? e.code : ErrorCodes.INTERNAL;
     const msg = e instanceof Error ? e.message : String(e);
@@ -235,11 +244,19 @@ async function handleCallbackQueue(
 async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
   const cron = ev.cron;
 
-  // "5 0 * * *" — daily cleanup
+  // "5 0 * * *" — daily cleanup + rollup
   if (cron === "5 0 * * *") {
+    // Cleanup old records (90d retention)
     const cutoff = Date.now() - 90 * 24 * 3600 * 1000;
     await env.DB.prepare(`DELETE FROM moderation_requests WHERE created_at < ?`).bind(cutoff).run();
     await env.DB.prepare(`DELETE FROM callback_deliveries WHERE created_at < ?`).bind(cutoff).run();
+    // Aggregate yesterday into stats_rollup
+    try {
+      const r = await rollupYesterday(env.DB);
+      console.log("[scheduled] rollup:", JSON.stringify(r));
+    } catch (e) {
+      console.warn("[scheduled] rollup failed", e);
+    }
     return;
   }
 
