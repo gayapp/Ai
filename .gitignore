@@ -21,6 +21,8 @@ dist/
 # Local secrets — never commit
 SECRETS.local.md
 *.local.md
+*.local.txt
+*.local.json
 
 # IDE
 .idea/
