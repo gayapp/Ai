@@ -28,7 +28,9 @@
 - [src/alerts/telegram.ts](../src/alerts/telegram.ts) · 错误率/延迟
 - [src/alerts/provider-health.ts](../src/alerts/provider-health.ts) · key 状态
 
-## 邮件通知（可选）
+## 邮件通知（可选 · 当前未启用）
+
+> 代码已就绪但 secret 未配置，当前仅走 Telegram。如需增加邮件通道：
 
 基于 Resend 服务。免费档每月 100 封。
 
