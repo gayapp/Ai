@@ -109,6 +109,8 @@ function sign(secret, body) {
 | 422 | `unsupported_content` | content 无法处理（如 URL 无法访问） |
 | 429 | `rate_limited` | 超过 app 配置的 QPS |
 | 500 | `provider_error` | 上游模型异常，建议重试 |
+| 502 | `provider_auth_failed` | 平台一端 AI Key 失效（罕见，平台已收到告警并正在处置）；建议退避 5 分钟重试 |
+| 503 | `service_unavailable` | 平台主备两家 AI 都鉴权失败（极罕见）；建议退避 10 分钟重试 |
 | 504 | `sync_timeout` | sync 模式超时，请改 async |
 
 错误响应格式：

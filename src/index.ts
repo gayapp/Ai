@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import archHtml from "../docs/architecture.html";
 import { AppError, ErrorCodes } from "./lib/errors.ts";
 import { checkAndAlert, sendTelegramAlert } from "./alerts/telegram.ts";
+import { checkProviderHealth } from "./alerts/provider-health.ts";
 import { moderateRouter } from "./routes/moderate.ts";
 import { adminAppsRouter } from "./routes/admin-apps.ts";
 import { adminPromptsRouter } from "./routes/admin-prompts.ts";
@@ -251,6 +252,19 @@ async function handleCallbackQueue(
 async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
   const cron = ev.cron;
 
+  // 每小时第 0 分钟跑 provider health；每 5 分钟跑阈值检查
+  // （*/5 其实会包含整点；为避免重复，整点时额外跑 provider health）
+  const now = new Date(ev.scheduledTime);
+  const isHourTick = now.getUTCMinutes() < 1;
+  if (cron === "*/5 * * * *" && isHourTick) {
+    try {
+      const r = await checkProviderHealth(env);
+      console.log("[scheduled] provider health:", JSON.stringify({ grok: r.grok.ok, gemini: r.gemini.ok, fired: r.fired }));
+    } catch (e) {
+      console.warn("[scheduled] provider health failed", e);
+    }
+  }
+
   // "5 0 * * *" — daily cleanup + rollup
   if (cron === "5 0 * * *") {
     // Cleanup old records (90d retention)
@@ -304,6 +318,13 @@ app.post("/admin/alerts/check", async (c) => {
   const { verifyAdmin } = await import("./auth/hmac.ts");
   verifyAdmin(c.env, c.req.raw.headers);
   const r = await checkAndAlert(c.env);
+  return c.json(r);
+});
+
+app.post("/admin/alerts/provider-health", async (c) => {
+  const { verifyAdmin } = await import("./auth/hmac.ts");
+  verifyAdmin(c.env, c.req.raw.headers);
+  const r = await checkProviderHealth(c.env);
   return c.json(r);
 });
 

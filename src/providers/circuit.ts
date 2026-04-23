@@ -15,6 +15,8 @@ import type { Provider } from "../moderation/schema.ts";
 
 const FAIL_THRESHOLD = 5;
 const OPEN_SECONDS = 30;
+/** Auth 错误立即长开熔断，避免继续空耗 Token 并放大告警 */
+export const AUTH_OPEN_SECONDS = 600; // 10 分钟
 
 interface CircuitState {
   failures: number;
@@ -63,6 +65,16 @@ export async function recordFailure(kv: KVNamespace, provider: Provider): Promis
   const failures = now - s.lastFailure > 60_000 ? 1 : s.failures + 1;
   const openUntil = failures >= FAIL_THRESHOLD ? now + OPEN_SECONDS * 1000 : s.openUntil;
   await save(kv, provider, { failures, openUntil, lastFailure: now });
+}
+
+/** Auth 错误立即开长熔断（10 分钟），不需要攒 5 次 */
+export async function recordAuthFailure(kv: KVNamespace, provider: Provider): Promise<void> {
+  const now = Date.now();
+  await save(kv, provider, {
+    failures: FAIL_THRESHOLD,
+    openUntil: now + AUTH_OPEN_SECONDS * 1000,
+    lastFailure: now,
+  });
 }
 
 export async function getCircuitSnapshot(kv: KVNamespace): Promise<Record<Provider, CircuitState>> {

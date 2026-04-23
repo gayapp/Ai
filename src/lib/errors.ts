@@ -10,6 +10,8 @@ export const ErrorCodes = {
   RATE_LIMITED: "rate_limited",
   PROVIDER_ERROR: "provider_error",
   PROVIDER_TIMEOUT: "provider_timeout",
+  PROVIDER_AUTH_FAILED: "provider_auth_failed",
+  SERVICE_UNAVAILABLE: "service_unavailable",
   SCHEMA_ERROR: "schema_error",
   SYNC_TIMEOUT: "sync_timeout",
   UNAUTHORIZED: "unauthorized",

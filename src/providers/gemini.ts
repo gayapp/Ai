@@ -57,6 +57,16 @@ export function createGeminiAdapter(env: Env): ProviderAdapter {
       const latencyMs = Date.now() - startedAt;
       if (!res.ok) {
         const text = await safeText(res);
+        // 400 API_KEY_INVALID / 401 / 403 = key 无效 / 被禁 — 升级为 AUTH_FAILED
+        const bodyLooksAuth = /API_KEY_INVALID|API key not valid|PERMISSION_DENIED|invalid API key/i.test(text);
+        if (res.status === 401 || res.status === 403 || (res.status === 400 && bodyLooksAuth)) {
+          throw new AppError(
+            ErrorCodes.PROVIDER_AUTH_FAILED,
+            502,
+            `gemini auth failed (http ${res.status})`,
+            text.slice(0, 500),
+          );
+        }
         throw new AppError(
           ErrorCodes.PROVIDER_ERROR,
           502,

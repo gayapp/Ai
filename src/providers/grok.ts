@@ -58,6 +58,15 @@ export function createGrokAdapter(env: Env): ProviderAdapter {
       const latencyMs = Date.now() - startedAt;
       if (!res.ok) {
         const text = await safeText(res);
+        // 401/403 = key 无效 / 被禁 / 没权限 — 升级为 AUTH_FAILED
+        if (res.status === 401 || res.status === 403) {
+          throw new AppError(
+            ErrorCodes.PROVIDER_AUTH_FAILED,
+            502,
+            `grok auth failed (http ${res.status})`,
+            text.slice(0, 500),
+          );
+        }
         throw new AppError(
           ErrorCodes.PROVIDER_ERROR,
           502,

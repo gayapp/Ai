@@ -8,7 +8,8 @@ import {
 } from "./schema.ts";
 import type { ProviderStrategy } from "./types.ts";
 import { getAdapter, resolveRoute } from "../providers/router.ts";
-import { canTry, recordFailure, recordSuccess } from "../providers/circuit.ts";
+import { canTry, recordAuthFailure, recordFailure, recordSuccess } from "../providers/circuit.ts";
+import { alertProviderAuthFailed } from "../alerts/provider-health.ts";
 
 export interface ExecuteArgs {
   bizType: BizType;
@@ -42,14 +43,31 @@ export async function executeModeration(
     if (!(err instanceof AppError)) throw err;
     if (
       err.code !== ErrorCodes.PROVIDER_ERROR &&
-      err.code !== ErrorCodes.PROVIDER_TIMEOUT
+      err.code !== ErrorCodes.PROVIDER_TIMEOUT &&
+      err.code !== ErrorCodes.PROVIDER_AUTH_FAILED
     ) {
       throw err;
     }
     console.warn(
       `[pipeline] primary ${route.primary} failed (${err.code}); falling back to ${route.fallback}`,
     );
-    return await tryProvider(env, args, route.fallback, false);
+    try {
+      return await tryProvider(env, args, route.fallback, false);
+    } catch (fbErr) {
+      // 两家都挂 — 如果都是 auth 失败，包装为 SERVICE_UNAVAILABLE 503
+      if (
+        err.code === ErrorCodes.PROVIDER_AUTH_FAILED &&
+        fbErr instanceof AppError &&
+        fbErr.code === ErrorCodes.PROVIDER_AUTH_FAILED
+      ) {
+        throw new AppError(
+          ErrorCodes.SERVICE_UNAVAILABLE,
+          503,
+          "both providers failed authentication — platform tokens invalid/expired, please wait",
+        );
+      }
+      throw fbErr;
+    }
   }
 }
 
@@ -67,9 +85,20 @@ async function tryProvider(
     }
     return r;
   } catch (err) {
-    if (recordCircuit && err instanceof AppError &&
-        (err.code === ErrorCodes.PROVIDER_ERROR || err.code === ErrorCodes.PROVIDER_TIMEOUT)) {
-      await recordFailure(env.NONCE, provider);
+    if (recordCircuit && err instanceof AppError) {
+      // Auth failures: 10-min circuit + immediate Telegram/email alert
+      if (err.code === ErrorCodes.PROVIDER_AUTH_FAILED) {
+        await recordAuthFailure(env.NONCE, provider);
+        // Fire-and-forget alert (don't block user request)
+        alertProviderAuthFailed(env, provider, err.message, err.details).catch((e) =>
+          console.warn("[alert] auth-failed notify error:", e),
+        );
+      } else if (
+        err.code === ErrorCodes.PROVIDER_ERROR ||
+        err.code === ErrorCodes.PROVIDER_TIMEOUT
+      ) {
+        await recordFailure(env.NONCE, provider);
+      }
     }
     throw err;
   }

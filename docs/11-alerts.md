@@ -10,8 +10,37 @@
 | 最小样本 | 20 条请求 | 低于不判定 |
 | 去重 | 同类型 5 分钟内不重发 | 防刷屏 |
 
-触发频率：Cron 每 **5 分钟** 跑一次（prod + dev）。配置在 [wrangler.toml](../wrangler.toml)。
-阈值代码在 [src/alerts/telegram.ts](../src/alerts/telegram.ts)，改完重部署即可。
+额外的 provider 监控：
+
+| 指标 | 阈值 | 行为 |
+|------|------|------|
+| **Provider 凭证失效**（401/403） | 任何一次 | **crit**，立即熔断 10 min，同时 Telegram + 邮件 |
+| **xAI key 巡检** `/v1/api-key` | 每小时 | `api_key_disabled` / `team_blocked` → crit |
+| **Gemini key 巡检**（最小 ping） | 每小时 | `API_KEY_INVALID` / 401 → crit |
+
+触发频率：
+- Cron `*/5 * * * *` — 错误率/延迟检查
+- Cron 每小时整点 — provider 健康巡检（`checkProviderHealth`）
+- 实时 — Provider 返回 401/403 时 pipeline 立即 `alertProviderAuthFailed`
+
+配置在 [wrangler.toml](../wrangler.toml)。
+阈值代码：
+- [src/alerts/telegram.ts](../src/alerts/telegram.ts) · 错误率/延迟
+- [src/alerts/provider-health.ts](../src/alerts/provider-health.ts) · key 状态
+
+## 邮件通知（可选）
+
+基于 Resend 服务。免费档每月 100 封。
+
+```bash
+# 1. 注册 https://resend.com，拿 API Key
+# 2. wrangler secret put RESEND_API_KEY
+# 3. wrangler secret put ALERT_EMAIL     # 收件人
+# 4. (可选) wrangler secret put ALERT_EMAIL_FROM   # 默认 alerts@resend.dev
+```
+
+未配置 `RESEND_API_KEY` + `ALERT_EMAIL` 时邮件告警 no-op（仅 Telegram 发）。
+仅在 **provider 凭证失效**这种 crit 级场景发邮件，避免刷屏。
 
 ## 配置（一次性，约 3 分钟）
 

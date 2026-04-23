@@ -21,6 +21,9 @@ declare global {
     ADMIN_TOKEN: string;
     TELEGRAM_BOT_TOKEN?: string;
     TELEGRAM_CHAT_ID?: string;
+    RESEND_API_KEY?: string;
+    ALERT_EMAIL?: string;
+    ALERT_EMAIL_FROM?: string;
 
     SYNC_TIMEOUT_MS: string;
     DEDUP_TTL_SECONDS: string;
