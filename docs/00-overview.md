@@ -62,8 +62,24 @@
 
 **MVP 总计：7 工作日。**
 
+## 线上入口
+
+| 类型 | URL |
+|------|-----|
+| **Prod API** | https://aicenter-api.1.gay |
+| **Admin UI** | https://aicenter.1.gay |
+| 架构图 | https://aicenter-api.1.gay/architecture |
+| Dev API | https://ai-guard-dev.schetkovvlad.workers.dev |
+
+## 监控告警
+
+错误率 ≥5% 或 延迟 ≥15s → **Telegram 自动推送**（每 5 分钟检查）。详见 [11-alerts.md](11-alerts.md)。
+
 ## 下一步阅读
 
 - 架构细节 → [01-architecture.md](01-architecture.md)
 - 我要接入 → [02-api-public.md](02-api-public.md)
-- 我要管理 → [03-api-admin.md](03-api-admin.md)
+- 我要管理（Admin API） → [03-api-admin.md](03-api-admin.md)
+- Admin Web UI → [10-admin-ui.md](10-admin-ui.md)
+- 告警 → [11-alerts.md](11-alerts.md)
+- 已接入的应用 → [apps/](apps/)

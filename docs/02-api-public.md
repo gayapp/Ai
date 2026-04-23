@@ -150,8 +150,9 @@ function sign(secret, body) {
 - 相同 `request_id` 可能收到重复回调（at-least-once），按 `request_id` 幂等处理。
 
 ### 配额与限流
-- 默认 50 QPS / app，可在管理端调整。
-- 超限返回 `429`，带 `Retry-After` header。
+- 默认 50 QPS / app，可在管理端调整（`PATCH /admin/apps/{id}`）。
+- 超限返回 `429 rate_limited`，响应体含 `details.retry_after_seconds`。
+- 实现是 KV 滑动窗口（每秒粒度）。CF KV 最终一致性导致**突发**可能短暂超限 2~3×，但**持续**高流量会被压制在限值附近。这是**软限流**，目的是防止单个 app 压垮平台，不是精确 QPS 管控。
 
 ### 缓存友好
 - `content` 相同但 `biz_id` 不同 **不影响缓存命中**（缓存 key 只看内容 hash + biz_type + prompt_version）。

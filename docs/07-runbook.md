@@ -2,6 +2,17 @@
 
 本地与线上出问题时的处置步骤。
 
+## 线上访问点
+
+| 类型 | URL |
+|------|-----|
+| Prod API | https://aicenter-api.1.gay |
+| Prod API（workers.dev 兜底） | https://ai-guard.schetkovvlad.workers.dev |
+| Dev API | https://ai-guard-dev.schetkovvlad.workers.dev |
+| Admin UI | https://aicenter.1.gay |
+| Admin UI（pages.dev 兜底） | https://ai-guard-admin.pages.dev |
+| 架构图 | https://aicenter-api.1.gay/architecture |
+
 ## 常用命令
 
 ```bash
@@ -28,8 +39,13 @@ wrangler queues list
 wrangler queues consumer list ai-guard-moderation
 
 # 观测
-wrangler tail --env prod
-wrangler tail --env prod --search "error_code=provider_error"
+wrangler tail                         # prod (top-level env)
+wrangler tail --env dev               # dev
+wrangler tail --search "error_code=provider_error"
+
+# 手动触发告警检查
+curl -X POST https://aicenter-api.1.gay/admin/alerts/check \
+  -H "authorization: Bearer $ADMIN_TOKEN"
 ```
 
 ## 应急场景
@@ -107,16 +123,24 @@ wrangler secret put GROK_API_KEY --env prod
 ```
 Worker 自动在下次请求生效（边缘会拉新版本）。**旧请求中的 HMAC 签名仍能工作**，因为 app secret 是独立的。
 
-## 监控与告警（Phase 2+）
+## 监控与告警（已实现）
 
 | 指标 | 阈值 | 通道 |
 |------|------|------|
-| 错误率 / 5min | > 5% | 告警群 |
-| Gemini P95 延迟 / 5min | > 15s | 告警群 |
-| DLQ 非空 | 任何 | 工单 |
-| CPU 使用 / Worker | > 80% | 观察即可 |
+| 错误率 / 5min | ≥ 5%（≥20% crit） | Telegram |
+| 最高延迟 / 5min | ≥ 15s | Telegram |
+| 最小样本 | 20 条/窗口 | 低于此数不判定 |
+| 去重 | 同类型 5 分钟内只发一次 | 防刷屏 |
 
-告警实现建议：Cron 每 5 分钟跑一次，命中阈值向运维 webhook 发消息（非 MVP）。
+实现：`src/alerts/telegram.ts`；Cron 每 5 分钟 (`*/5 * * * *`) 触发。
+secret：`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`（通过 `wrangler secret put` 配置）。
+未配置 secret 时 Cron 仍然跑，只是告警不发出（不报错）。
+
+手动测试：
+```bash
+curl -X POST https://aicenter-api.1.gay/admin/alerts/test \
+  -H "authorization: Bearer $ADMIN_TOKEN"
+```
 
 ## 联系方式
 

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { AppError, ErrorCodes } from "../lib/errors.ts";
 import { verifyAppRequest } from "../auth/hmac.ts";
+import { enforceRateLimit } from "../auth/rate-limit.ts";
 import {
   ModerateRequestSchema,
   CachedResult,
@@ -28,6 +29,7 @@ export const moderateRouter = new Hono<{ Bindings: Env }>();
 moderateRouter.post("/v1/moderate", async (c) => {
   const rawBody = await c.req.text();
   const app = await verifyAppRequest(c.env, c.req.raw.headers, rawBody);
+  await enforceRateLimit(c.env.NONCE, app.id, app.rate_limit_qps);
 
   let parsed: ModerateRequest;
   try {
@@ -168,6 +170,24 @@ moderateRouter.post("/v1/moderate", async (c) => {
         202,
       );
     }
+    // Record as error so stats don't leak "pending" rows.
+    const code = err instanceof AppError ? err.code : ErrorCodes.INTERNAL;
+    const msg = err instanceof Error ? err.message : String(err);
+    await recordCompleted(c.env.DB, {
+      id: requestId,
+      cached: false,
+      status: "error",
+      risk_level: null,
+      categories: [],
+      reason: msg.slice(0, 256),
+      provider: null,
+      model: null,
+      prompt_version: null,
+      input_tokens: 0,
+      output_tokens: 0,
+      latency_ms: 0,
+      error_code: code,
+    });
     throw err;
   }
 

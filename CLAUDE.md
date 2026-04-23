@@ -12,8 +12,13 @@
 - [src/providers/router.ts](src/providers/router.ts) — Grok / Gemini 选路 + 熔断
 - [src/callback/dispatcher.ts](src/callback/dispatcher.ts) — Queue 消费者，投递回调
 - [src/auth/hmac.ts](src/auth/hmac.ts) — 入站 HMAC 校验
+- [src/auth/rate-limit.ts](src/auth/rate-limit.ts) — per-app KV 滑动窗限流
+- [src/alerts/telegram.ts](src/alerts/telegram.ts) — Telegram 告警（Cron 驱动）
+- [src/routes/admin-*.ts](src/routes/) — Admin REST API（apps / prompts / stats）
+- [admin-ui/](admin-ui/) — Cloudflare Pages 前端（React + Vite）
 - [migrations/](migrations/) — D1 迁移；**只追加，不改历史**
 - [docs/04-callback-spec.md](docs/04-callback-spec.md) — ★ 对外契约，改动须走评审
+- [docs/apps/](docs/apps/) — 每个接入应用的专属对接文档
 
 ## 铁律
 

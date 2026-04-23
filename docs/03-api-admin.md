@@ -117,17 +117,22 @@ Authorization: Bearer <ADMIN_TOKEN>
 }
 ```
 
-### `GET /admin/stats/timeseries`
-
-**Query**：`?period=hour&metric=count&group_by=biz_type&from=...&to=...`
-
-返回时间序列数据，供前端画图。
-
 ### `GET /admin/stats/top-users?app_id=...&limit=20`
 被拒最多的用户（反滥用）。
 
-### `GET /admin/stats/categories?biz_type=comment&from=...&to=...`
-高风险类别分布。
+### `GET /admin/stats/requests` — 全量列表（分页、过滤）
+
+**Query**：`?app_id=&biz_type=&status=&from=&to=&limit=100`
+
+返回数组，每条是审核记录的摘要。`limit` ≤ 500。
+
+### `GET /admin/stats/requests/:id` — 单条完整详情
+
+返回该请求的所有字段，含 `content_hash` / `prompt_version` / `tokens` / `extra` / `mode` / `error_code` 等。仅 admin 可见，不需要应用 HMAC。
+
+### `GET /admin/stats/callbacks?failed=1&limit=50` — 回调投递记录
+
+每次 webhook 投递的尝试结果（HTTP 状态、重试次数、最后错误、下次重试时间）。`failed=1` 只看未投递成功的。
 
 ---
 
@@ -145,13 +150,28 @@ Authorization: Bearer <ADMIN_TOKEN>
 
 ---
 
-## Callbacks（投递观测）
+## Alerts（告警）
 
-### `GET /admin/callbacks?status=failed&limit=50`
-失败/重试中的回调列表。
+### `POST /admin/alerts/test`
+手动发一条测试 Telegram 消息，用于验证 `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` 配置正确。
 
-### `POST /admin/callbacks/{request_id}/retry`
-手工触发重试。
+返回：
+```json
+{ "sent": true, "bot_configured": true, "chat_configured": true }
+```
+
+### `POST /admin/alerts/check`
+立即执行一次阈值检查（等价于 Cron 的 `*/5 * * * *` 那一拍），返回当前样本 + 是否触发告警。
+
+返回：
+```json
+{
+  "checks": ["total=120 errors=3 err_rate=2.50% max_lat=4500ms"],
+  "fired": []
+}
+```
+
+阈值在 `src/alerts/telegram.ts` 的 `DEFAULT_THRESHOLDS` 中定义，改完重新部署生效。
 
 ---
 

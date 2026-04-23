@@ -168,7 +168,7 @@ HTTP `202`
 | 403 | `app_disabled` | 本 app 被停用（联系管理员） |
 | 404 | `app_not_found` | app_id 不存在 |
 | 422 | `unsupported_content` | 图片 URL 无法访问 / 非图片 |
-| 429 | `rate_limited` | 超过 QPS 限额 |
+| 429 | `rate_limited` | 超过 QPS 限额（本 app 默认 100/s）；响应体 `details.retry_after_seconds` |
 | 502 | `provider_error` | 上游模型异常，建议重试 |
 | 504 | `sync_timeout` | 同步模式超时，改用 `async` |
 
