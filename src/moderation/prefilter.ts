@@ -57,10 +57,10 @@ export const AD_RULES: AdRule[] = [
     name: "wechat_v_signal",
     re: /(微|威|[vV][iI]?)\s*[信芯xX]+[\s一-鿿:：]{0,6}[a-zA-Z][\w\-]{4,}/u,
   },
-  // 加V/加微 + 账号
+  // 加V/加微/加X/加推 + 账号（加 后跟任意字几个字，之后有 微/V/X/推/tg/telegram + 5+ 位账号）
   {
-    name: "add_wechat",
-    re: /(加|私|聊).{0,4}(微|v|V|威|VX|vx)[信芯xX]?\s*[a-zA-Z0-9\-_]{5,}/iu,
+    name: "add_social",
+    re: /(加|私|聊|约)[\s一-鿿的我]{0,4}(微|威|VX|vx|[vVxX]|推|tg|TG|telegram|Telegram|推特|电报)[信芯xX号群]?[\s一-鿿:：]{0,3}[a-zA-Z][\w\-]{4,}/iu,
   },
   // QQ 号（5-12 位数字，前有 QQ/扣扣/企鹅/🐧 标识）
   {

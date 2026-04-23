@@ -64,6 +64,20 @@ describe("prefilter · applyPrefilter L2 (ad blacklist)", () => {
     expect(r.kind).toBe("reject_ad");
   });
 
+  it("catches 加我的X + account (real-world prod case 019dbbe5)", () => {
+    const r = applyPrefilter("comment", "你好加我的X：zhanghao3333");
+    expect(r.kind).toBe("reject_ad");
+    expect(r.tag).toMatch(/^ad:/);
+  });
+
+  it("catches 加推特 + id", () => {
+    expect(applyPrefilter("comment", "加推特 gayxx2024").kind).toBe("reject_ad");
+  });
+
+  it("catches 私聊VX + id", () => {
+    expect(applyPrefilter("comment", "私聊VX abc12345").kind).toBe("reject_ad");
+  });
+
   it("catches QQ number", () => {
     const r = applyPrefilter("nickname", "QQ876543210");
     expect(r.kind).toBe("reject_ad");

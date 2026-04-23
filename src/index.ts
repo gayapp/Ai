@@ -253,7 +253,6 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
   const cron = ev.cron;
 
   // 每小时第 0 分钟跑 provider health；每 5 分钟跑阈值检查
-  // （*/5 其实会包含整点；为避免重复，整点时额外跑 provider health）
   const now = new Date(ev.scheduledTime);
   const isHourTick = now.getUTCMinutes() < 1;
   if (cron === "*/5 * * * *" && isHourTick) {
@@ -262,6 +261,28 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
       console.log("[scheduled] provider health:", JSON.stringify({ grok: r.grok.ok, gemini: r.gemini.ok, fired: r.fired }));
     } catch (e) {
       console.warn("[scheduled] provider health failed", e);
+    }
+  }
+
+  // 每 5 分钟扫尾：把 > 5 分钟仍 pending 的行标为 error
+  // （防止 Worker 被意外终止留下残单）
+  if (cron === "*/5 * * * *") {
+    try {
+      const cutoff = Date.now() - 5 * 60 * 1000;
+      const r = await env.DB.prepare(
+        `UPDATE moderation_requests
+         SET status='error', error_code='pending_timeout',
+             reason='Worker 未完成（sweep）', completed_at=?
+         WHERE status='pending' AND created_at < ?`,
+      )
+        .bind(Date.now(), cutoff)
+        .run();
+      const changes = (r.meta as { changes?: number } | undefined)?.changes ?? 0;
+      if (changes > 0) {
+        console.log(`[scheduled] sweep: marked ${changes} pending rows as error`);
+      }
+    } catch (e) {
+      console.warn("[scheduled] sweep failed", e);
     }
   }
 

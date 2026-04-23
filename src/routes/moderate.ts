@@ -54,6 +54,18 @@ moderateRouter.post("/v1/moderate", async (c) => {
   const contentHash = await computeContentHash(parsed.biz_type, parsed.content);
   const callbackUrl = parsed.callback_url ?? app.callback_url;
 
+  // ==== 前置参数校验（必须在 recordPending 之前，否则失败时留残单）====
+  // avatar / mode=async 都需要 callback_url（auto+avatar 也会降级成 async）
+  const willRequireCallback =
+    parsed.mode === "async" || (parsed.mode === "auto" && isImage);
+  if (willRequireCallback && !callbackUrl) {
+    throw new AppError(
+      ErrorCodes.INVALID_REQUEST,
+      400,
+      "async mode requires callback_url (on request or on app config)",
+    );
+  }
+
   // ==== P1.1 前置漏斗：L1 低信噪 / L2 高置信广告 ====
   const pf = applyPrefilter(parsed.biz_type, parsed.content);
 
@@ -146,13 +158,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
     parsed.mode === "async" || (parsed.mode === "auto" && isImage);
 
   if (shouldAsync) {
-    if (!callbackUrl) {
-      throw new AppError(
-        ErrorCodes.INVALID_REQUEST,
-        400,
-        "async mode requires callback_url (on request or on app config)",
-      );
-    }
+    // callbackUrl 已在函数顶部校验过（willRequireCallback）
     await c.env.MODERATION_QUEUE.send({
       request_id: requestId,
       app_id: app.id,
@@ -160,7 +166,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
       biz_id: parsed.biz_id,
       user_id: parsed.user_id ?? null,
       content: parsed.content,
-      callback_url: callbackUrl,
+      callback_url: callbackUrl!,
       extra: parsed.extra ?? null,
       created_at_ms: Date.now(),
     });
@@ -183,14 +189,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
     });
   } catch (err) {
     if (err instanceof AppError && err.code === ErrorCodes.PROVIDER_TIMEOUT && parsed.mode === "auto") {
-      // Auto-downgrade to async
-      if (!callbackUrl) {
-        throw new AppError(
-          ErrorCodes.SYNC_TIMEOUT,
-          504,
-          "timed out and no callback_url to downgrade to",
-        );
-      }
+      // Auto-downgrade to async（callbackUrl 已预校验保证存在）
       await c.env.MODERATION_QUEUE.send({
         request_id: requestId,
         app_id: app.id,
@@ -198,7 +197,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
         biz_id: parsed.biz_id,
         user_id: parsed.user_id ?? null,
         content: parsed.content,
-        callback_url: callbackUrl,
+        callback_url: callbackUrl!,
         extra: parsed.extra ?? null,
         created_at_ms: Date.now(),
       });
@@ -208,42 +207,47 @@ moderateRouter.post("/v1/moderate", async (c) => {
       );
     }
     // Record as error so stats don't leak "pending" rows.
+    // 用 waitUntil 保证客户端断开后写入也完成
     const code = err instanceof AppError ? err.code : ErrorCodes.INTERNAL;
     const msg = err instanceof Error ? err.message : String(err);
-    await recordCompleted(c.env.DB, {
-      id: requestId,
-      cached: false,
-      status: "error",
-      risk_level: null,
-      categories: [],
-      reason: msg.slice(0, 256),
-      provider: null,
-      model: null,
-      prompt_version: null,
-      input_tokens: 0,
-      output_tokens: 0,
-      latency_ms: 0,
-      error_code: code,
-    });
+    c.executionCtx.waitUntil(
+      recordCompleted(c.env.DB, {
+        id: requestId,
+        cached: false,
+        status: "error",
+        risk_level: null,
+        categories: [],
+        reason: msg.slice(0, 256),
+        provider: null,
+        model: null,
+        prompt_version: null,
+        input_tokens: 0,
+        output_tokens: 0,
+        latency_ms: 0,
+        error_code: code,
+      }),
+    );
     throw err;
   }
 
-  // Persist
-  await recordCompleted(c.env.DB, {
-    id: requestId,
-    cached: false,
-    status: result.status,
-    risk_level: result.risk_level,
-    categories: result.categories,
-    reason: result.reason,
-    provider: result.provider,
-    model: result.model,
-    prompt_version: result.prompt_version,
-    input_tokens: result.input_tokens,
-    output_tokens: result.output_tokens,
-    latency_ms: result.latency_ms,
-    error_code: result.error_code ?? null,
-  });
+  // Persist（用 waitUntil 保证客户端断开后写入也完成，避免 pending 残留）
+  c.executionCtx.waitUntil(
+    recordCompleted(c.env.DB, {
+      id: requestId,
+      cached: false,
+      status: result.status,
+      risk_level: result.risk_level,
+      categories: result.categories,
+      reason: result.reason,
+      provider: result.provider,
+      model: result.model,
+      prompt_version: result.prompt_version,
+      input_tokens: result.input_tokens,
+      output_tokens: result.output_tokens,
+      latency_ms: result.latency_ms,
+      error_code: result.error_code ?? null,
+    }),
+  );
 
   // Cache non-error successes (and only when we had a dedup key derived from
   // the primary prompt — fallback-only cases skip caching to keep the model set coherent)
