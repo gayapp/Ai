@@ -42,6 +42,17 @@ scripts/      运维脚本（创建 app、轮换密钥等）
 .claude/      给 Claude Code 的项目级配置与 Skills
 ```
 
+## 在线访问
+
+- **Prod Worker**：<https://ai-guard.schetkovvlad.workers.dev>
+  - 健康检查：`/health`
+  - **系统架构图**：[`/architecture`](https://ai-guard.schetkovvlad.workers.dev/architecture)
+- **Dev Worker**：<https://ai-guard-dev.schetkovvlad.workers.dev>
+
 ## 状态
 
-> MVP 开发中。Phase 规划见 [docs/00-overview.md#实施顺序](docs/00-overview.md#实施顺序)。
+MVP 已部署上线。dev + prod 环境均通过真实端到端验收：
+- Grok（`grok-4-fast-non-reasoning`）：文本审核 ~500ms
+- Gemini Vision（`gemini-2.5-flash`）：头像审核 ~3.5s
+- 缓存命中：~400ms（无 token 消耗）
+- 单元测试 21/21 pass
