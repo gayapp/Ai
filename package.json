@@ -1,0 +1,35 @@
+{
+  "name": "ai-guard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare-based unified AI moderation middleware (Grok + Gemini) for internal apps.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "publish:prod": "wrangler deploy",
+    "publish:dev": "wrangler deploy --env dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "migrate:local": "wrangler d1 migrations apply ai-guard --local",
+    "migrate:dev": "wrangler d1 migrations apply ai-guard --env dev --remote",
+    "migrate:prod": "wrangler d1 migrations apply ai-guard --env prod --remote",
+    "seed:local": "node --experimental-transform-types scripts/seed-app.ts",
+    "cf-typegen": "wrangler types"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "hono": "^4.11.5",
+    "zod": "^4.0.15"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.9.12",
+    "@cloudflare/workers-types": "^4.20251023.0",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.40.0"
+  }
+}

@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ai-guard · 架构与流程</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --border: #30363d;
+    --fg: #e6edf3;
+    --muted: #8d96a0;
+    --accent: #58a6ff;
+    --good: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1b2230;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff; --panel: #f6f8fa; --border: #d0d7de; --fg: #1f2328;
+      --muted: #57606a; --accent: #0969da; --good: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+      --code-bg: #f6f8fa;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Microsoft YaHei", Roboto, sans-serif;
+    line-height: 1.55; }
+  header {
+    padding: 40px 24px 24px; text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0 0 8px; font-size: 32px; letter-spacing: 0.5px; }
+  header .sub { color: var(--muted); font-size: 15px; }
+  header .badges { margin-top: 14px; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px;
+    font-size: 12px; margin: 0 4px; background: var(--panel); border: 1px solid var(--border); color: var(--muted); }
+  nav { position: sticky; top: 0; z-index: 10;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 12px 24px; display: flex; flex-wrap: wrap; gap: 16px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 14px; }
+  nav a:hover, nav a.active { color: var(--accent); }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 24px 80px; }
+  section { padding: 40px 0 12px; }
+  section h2 { font-size: 22px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  section h3 { font-size: 17px; margin-top: 28px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0; }
+  th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+  th { background: var(--panel); }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: 14px 16px; border-radius: 6px;
+    border: 1px solid var(--border); overflow-x: auto; }
+  pre code { background: transparent; padding: 0; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 18px; margin: 12px 0; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .k { color: var(--muted); }
+  .v { font-weight: 600; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 3px; font-size: 12px; }
+  .pill.pass { background: rgba(63,185,80,0.18); color: var(--good); }
+  .pill.reject { background: rgba(248,81,73,0.18); color: var(--bad); }
+  .pill.review { background: rgba(210,153,34,0.18); color: var(--warn); }
+  .pill.err { background: rgba(139,148,158,0.2); color: var(--muted); }
+  .mermaid { background: transparent; text-align: center; margin: 20px 0; }
+  .note { border-left: 3px solid var(--accent); padding: 8px 14px; background: var(--panel);
+    border-radius: 0 6px 6px 0; margin: 12px 0; color: var(--fg); }
+  .warn { border-left-color: var(--warn); }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<header>
+  <h1>ai-guard</h1>
+  <div class="sub">基于 Cloudflare 的统一 AI 内容审核中间平台 · 对接 Grok + Gemini · 服务公司内所有 UGC 审核</div>
+  <div class="badges">
+    <span class="badge">Cloudflare Workers</span>
+    <span class="badge">Grok-4-fast</span>
+    <span class="badge">Gemini-2.5-flash</span>
+    <span class="badge">D1 · KV · Queues</span>
+  </div>
+</header>
+
+<nav>
+  <a href="#overview">概览</a>
+  <a href="#arch">总体架构</a>
+  <a href="#flow-sync">同步流程</a>
+  <a href="#flow-async">异步流程</a>
+  <a href="#flow-dedup">去重流程</a>
+  <a href="#flow-fallback">熔断流程</a>
+  <a href="#flow-callback">回调流程</a>
+  <a href="#prompts">指令（Prompt）</a>
+  <a href="#data">数据可见性</a>
+  <a href="#deploy">部署信息</a>
+</nav>
+
+<main>
+
+<section id="overview">
+<h2>1. 概览</h2>
+
+<p>ai-guard 统一为公司各 C 端应用提供 UGC 审核能力。应用只对接一个 API，结果以固定 JSON 格式返回或回调。内部上游对接 Grok（文本）和 Gemini Vision（图片），支持熔断切换、去重缓存、prompt 热更新、审计统计。</p>
+
+<div class="cards">
+  <div class="card"><div class="k">业务类型</div><div class="v">comment · nickname · bio · avatar</div></div>
+  <div class="card"><div class="k">响应模式</div><div class="v">混合自适应（sync / async / auto）</div></div>
+  <div class="card"><div class="k">鉴权</div><div class="v">HMAC-SHA256 + Nonce + Timestamp</div></div>
+  <div class="card"><div class="k">计费</div><div class="v">不做（仅统计：请求数/token/命中率）</div></div>
+  <div class="card"><div class="k">模型</div><div class="v">grok-4-fast-non-reasoning / gemini-2.5-flash</div></div>
+  <div class="card"><div class="k">延迟</div><div class="v">文本 ~500ms · 图片 ~3.5s · 缓存 ~400ms</div></div>
+</div>
+</section>
+
+<section id="arch">
+<h2>2. 总体架构</h2>
+
+<div class="mermaid">
+flowchart LR
+  classDef ext fill:#1b2230,stroke:#58a6ff,color:#e6edf3
+  classDef cf fill:#141b24,stroke:#3fb950,color:#e6edf3
+  classDef store fill:#1a1d24,stroke:#d29922,color:#e6edf3
+  classDef model fill:#231b2c,stroke:#bc8cff,color:#e6edf3
+
+  App[业务应用<br/>发请求 + 收回调]:::ext
+  Admin[管理端<br/>改 prompt / 看统计]:::ext
+
+  subgraph CFWorker["Cloudflare Worker: ai-guard"]
+    direction TB
+    Fetch[/HTTP 入口<br/>fetch handler/]
+    Queue[/Queue 消费者<br/>异步 + 回调/]
+    Cron[/Cron<br/>清理过期数据/]
+    Pipe[Moderation Pipeline<br/>规范化→hash→去重→路由]
+    Router{Provider Router<br/>主+备熔断}
+  end
+  Fetch --> Pipe
+  Queue --> Pipe
+  Pipe --> Router
+
+  Grok[Grok API<br/>grok-4-fast]:::model
+  Gem[Gemini API<br/>2.5-flash + Vision]:::model
+
+  Router --> Grok
+  Router --> Gem
+
+  D1[(D1<br/>apps · prompts · requests<br/>callbacks · stats)]:::store
+  KV1[(KV DEDUP_CACHE<br/>内容去重)]:::store
+  KV2[(KV PROMPTS<br/>热更新缓存)]:::store
+  KV3[(KV APPS<br/>应用配置)]:::store
+  KV4[(KV NONCE<br/>防重放)]:::store
+  Q1[(Queue MODERATION<br/>异步审核任务)]:::store
+  Q2[(Queue CALLBACK<br/>回调投递 + 重试)]:::store
+
+  Pipe --> D1
+  Pipe --> KV1
+  Pipe --> KV2
+  Pipe --> KV3
+  Fetch --> KV4
+  Fetch -->|async| Q1
+  Pipe -->|完成| Q2
+  Q1 --> Queue
+  Q2 --> Queue
+
+  App -->|HTTPS + HMAC| Fetch
+  Admin -->|Bearer Token| Fetch
+  CFWorker:::cf
+</div>
+
+<h3>2.1 Cloudflare 资源</h3>
+<table>
+  <thead><tr><th>资源</th><th>dev</th><th>prod</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td>Worker</td><td><code>ai-guard-dev</code></td><td><code>ai-guard</code></td><td>唯一 Worker，三入口（fetch/queue/scheduled）</td></tr>
+    <tr><td>D1</td><td><code>ai-guard-dev</code></td><td><code>ai-guard</code></td><td>主数据库：apps / prompts / 审核记录 / 统计</td></tr>
+    <tr><td>KV</td><td colspan=2><code>ai-guard-[dev-]dedup-cache / prompts / apps / nonce</code></td><td>去重 / prompt 缓存 / app 配置 / nonce 防重放</td></tr>
+    <tr><td>Queue</td><td colspan=2><code>ai-guard-[dev-]moderation</code> + <code>-callback</code> (+ DLQ)</td><td>异步审核、回调重试、死信</td></tr>
+    <tr><td>Cron</td><td colspan=2>每小时 + 每日 0 点</td><td>清理 90 天前明细、每日汇总（Phase 2+）</td></tr>
+  </tbody>
+</table>
+</section>
+
+<section id="flow-sync">
+<h2>3. 同步审核流程（评论/昵称/简介）</h2>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant A as 业务应用
+  participant W as Worker (fetch)
+  participant K as KV (dedup)
+  participant D as D1
+  participant G as Grok API
+
+  A->>W: POST /v1/moderate<br/>Body + HMAC headers
+  W->>W: 校验 Timestamp (±300s)
+  W->>W: 校验 HMAC 签名
+  W->>W: Nonce 防重放（5min）
+  W->>D: INSERT moderation_requests (status=pending)
+  W->>K: GET dedup key<br/>(biz_type:prompt_v:content_hash)
+  alt 命中缓存
+    K-->>W: cached result
+    W->>D: UPDATE ... status, cached=1
+    W-->>A: 200 {cached:true, result}
+  else 未命中
+    W->>G: chat/completions (JSON mode)
+    G-->>W: {status, risk_level, categories, reason}
+    W->>W: Zod 校验输出结构
+    W->>D: UPDATE ... 结果 + tokens + latency
+    W->>K: PUT dedup key (TTL 7d)
+    W-->>A: 200 {cached:false, result}
+  end
+</div>
+</section>
+
+<section id="flow-async">
+<h2>4. 异步审核流程（头像 / mode=async / 超时降级）</h2>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant A as 业务应用
+  participant W as Worker (fetch)
+  participant QM as Queue<br/>(MODERATION)
+  participant C as Worker (consumer)
+  participant Gem as Gemini Vision
+  participant QC as Queue<br/>(CALLBACK)
+  participant D as Worker<br/>(dispatcher)
+
+  A->>W: POST /v1/moderate<br/>biz_type=avatar, content=图片 URL
+  W->>W: HMAC + Nonce 校验
+  W->>+QM: enqueue ModerationJob
+  W-->>A: 202 {request_id, accepted_at}
+  QM-->>-C: 消费
+  C->>C: 拉图片 → base64
+  C->>Gem: generateContent (image + prompt)
+  Gem-->>C: JSON 审核结果
+  C->>D1: UPDATE 结果
+  C->>+QC: enqueue CallbackJob
+  QC-->>-D: 消费
+  D->>A: POST callback_url<br/>JSON + X-Signature
+  alt 失败
+    D->>QC: 重试（1/5/30/120/720 min）
+  end
+</div>
+
+<div class="note">
+  <strong>自适应降级</strong>：<code>mode=auto</code> 下，如果 Grok 调用超时（默认 10s），Worker 立刻 <code>enqueue</code> 转异步，响应 <code>202</code>，避免应用侧被 30s 上限阻塞。
+</div>
+</section>
+
+<section id="flow-dedup">
+<h2>5. 去重与 Prompt 热更新流程</h2>
+
+<div class="mermaid">
+flowchart TD
+  Req[收到请求] --> Norm[content 规范化<br/>trim + NFKC + 空白压缩]
+  Norm --> Hash[SHA-256 → content_hash]
+  Hash --> Load[查 KV PROMPTS<br/>取 active 版本号]
+  Load --> Key[拼 key: biz_type:prompt_v:content_hash]
+  Key --> Lookup{查 KV<br/>DEDUP_CACHE}
+  Lookup -->|命中| Return[返回缓存结果<br/>打 cached=true]
+  Lookup -->|未命中| Call[调模型 → 解析 → 写 KV]
+  Return --> W[同时写 D1 统计]
+  Call --> W
+
+  Admin[管理端发新 prompt] --> Publish[D1 INSERT v+1<br/>旧版本 is_active=0]
+  Publish --> Kill[删除 KV PROMPTS:<br/>biz_type:provider:active]
+  Kill --> NextReq[下次请求]
+  NextReq --> Load
+  Kill -.-> Note[旧 KV DEDUP_CACHE 条目<br/>因 key 含 prompt_v<br/>自然不再命中]
+</div>
+
+<div class="note">
+  <strong>为什么 KV 键里必须含 <code>prompt_version</code>？</strong>
+  如果不含，prompt 升级后旧缓存会继续命中，用户拿到的是旧规则下的判断。含版本号后，旧缓存 key 不再被任何新请求查询，随 TTL 自然消失。
+</div>
+</section>
+
+<section id="flow-fallback">
+<h2>6. 熔断/兜底（Router）</h2>
+
+<div class="mermaid">
+flowchart LR
+  R[请求] --> P[Provider Router<br/>按 biz_type 选主]
+  P --> P1{主 Provider<br/>调用}
+  P1 -->|成功| OK[返回]
+  P1 -->|PROVIDER_ERROR<br/>PROVIDER_TIMEOUT| F{是否有备?}
+  F -->|有| B[备 Provider<br/>重新取其 active prompt]
+  F -->|无| Err[抛错]
+  B --> B1{备 Provider<br/>调用}
+  B1 -->|成功| OK
+  B1 -->|失败| Err
+</div>
+
+<table>
+  <thead><tr><th>biz_type</th><th>主 provider</th><th>备 provider</th></tr></thead>
+  <tbody>
+    <tr><td>comment</td><td>grok</td><td>gemini</td></tr>
+    <tr><td>nickname</td><td>grok</td><td>gemini</td></tr>
+    <tr><td>bio</td><td>grok</td><td>gemini</td></tr>
+    <tr><td>avatar</td><td>gemini</td><td>—（图片仅 Gemini）</td></tr>
+  </tbody>
+</table>
+</section>
+
+<section id="flow-callback">
+<h2>7. 回调投递流程</h2>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant P as Pipeline<br/>(完成)
+  participant QC as CALLBACK_QUEUE
+  participant D as Dispatcher<br/>(queue consumer)
+  participant DB as D1 callback_deliveries
+  participant A as 业务应用
+
+  P->>QC: enqueue {request_id, attempt=0}
+  QC-->>D: 消费
+  D->>DB: UPSERT row (attempts=0)
+  D->>D: 构造 CallbackBody + HMAC 签名
+  D->>A: POST callback_url
+  alt 应用返回 2xx
+    A-->>D: 200
+    D->>DB: delivered_at = now
+  else 应用失败 / 超时
+    A-->>D: 4xx/5xx/timeout
+    D->>DB: attempts++, last_error
+    alt attempts < 5
+      D->>QC: 重新入队<br/>delay = 1/5/30/120/720 min
+    else attempts ≥ 5
+      D->>DB: 标记永久失败，进 DLQ
+    end
+  end
+</div>
+</section>
+
+<section id="prompts">
+<h2>8. 指令（Prompt）存哪里、怎么改</h2>
+
+<h3>8.1 存储位置</h3>
+<p>所有 prompt 存在 <strong>D1 的 <code>prompts</code> 表</strong>，按 <code>(biz_type, provider, version)</code> 唯一。一个 <code>(biz_type, provider)</code> 同时只有一个 <code>is_active=1</code>。</p>
+
+<pre><code>CREATE TABLE prompts (
+  id         INTEGER PRIMARY KEY,
+  biz_type   TEXT,          -- comment | nickname | bio | avatar
+  provider   TEXT,          -- grok | gemini
+  version    INTEGER,
+  content    TEXT,          -- 整段 prompt 正文
+  is_active  INTEGER,
+  created_by TEXT,
+  created_at INTEGER,
+  UNIQUE(biz_type, provider, version)
+);</code></pre>
+
+<h3>8.2 初始默认指令（已 seed 入库）</h3>
+<p>本次初始化通过 migration 0001 + 0002 直接写库，共 <strong>14 条</strong>（每个 biz_type × 每个 provider × v1（保留）+ v2（激活））。</p>
+
+<p>v2 默认 prompt 基于"only visible evidence"、"灰色地带给 review、不一刀切"的原则编写，结构参考本项目 <code>C:\code\irc\python</code> 的 LLM 审核范式，但内容已改写为通用 UGC 场景（不含成人内容平台专属规则）。</p>
+
+<p>每条 prompt 都声明了以下判定级别：</p>
+<ul>
+  <li><span class="pill reject">reject</span> + risk_level=high：色情低俗 / 人身攻击 / 政治敏感 / 广告引流 / 刷屏 / 暴力威胁</li>
+  <li><span class="pill reject">reject</span> + risk_level=medium：引战歧视 / 软色情暗示 / 隐藏广告</li>
+  <li><span class="pill review">review</span>：意思含糊但疑似违规、谐音嫌疑、幽默/反讽不确定</li>
+  <li><span class="pill pass">pass</span> + risk_level=safe：正常表达</li>
+</ul>
+
+<h3>8.3 热更新（生产环境）</h3>
+<p>不用改代码、不用重新部署。通过 <strong>Admin API</strong>：</p>
+
+<pre><code># 发布新版本（同 biz_type+provider 下 version 自动 +1，旧版本 is_active 置 0）
+curl -X POST https://ai-guard.schetkovvlad.workers.dev/admin/prompts \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{
+    "biz_type": "comment",
+    "provider": "grok",
+    "content": "&lt;你的新 prompt 正文&gt;",
+    "created_by": "alice"
+  }'</code></pre>
+
+<p>发布后：</p>
+<ul>
+  <li>D1 写入新 version 记录，旧 active 自动失活</li>
+  <li>KV <code>PROMPTS</code> 缓存失效（60s 内全边缘生效）</li>
+  <li>KV <code>DEDUP_CACHE</code> 因 key 含 <code>prompt_version</code> 自然失效，无需手动清理</li>
+</ul>
+
+<h3>8.4 查看 / 回滚 / 干跑</h3>
+<pre><code># 列全部版本
+GET /admin/prompts?biz_type=comment&amp;provider=grok
+
+# 回滚到旧版本（把目标 id 置 is_active=1，其他置 0）
+POST /admin/prompts/:id/rollback
+
+# 干跑：用新 prompt 跑 N 条样本，看输出是否合 schema
+POST /admin/prompts/dry-run
+{ "biz_type":"comment","provider":"grok","content":"...","samples":["样本1","样本2"] }</code></pre>
+
+<div class="warn note">
+  <strong>纪律</strong>：prompt 中无论写什么，都<u>不可能破坏回调 JSON 结构</u>——结构由代码层 Zod schema 锁定（<code>src/moderation/schema.ts</code>），模型返回不合规直接标 <code>status=error</code>。所以运营可以放心调 prompt 的<strong>判断规则</strong>，不会泄漏异常字段到业务侧。
+</div>
+</section>
+
+<section id="data">
+<h2>9. 数据可见性（全部可查）</h2>
+
+<p>所有审核记录、回调投递、统计指标均可通过 Admin API 查询。Bearer token 鉴权（prod 和 dev 各独立 token）。</p>
+
+<h3>9.1 可查哪些数据？</h3>
+
+<table>
+  <thead><tr><th>数据</th><th>接口</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>所有审核请求列表（分页）</td>
+      <td><code>GET /admin/stats/requests?limit=N&amp;app_id=&amp;biz_type=&amp;status=&amp;from=&amp;to=</code></td>
+      <td>支持按 app / 业务 / 状态 / 时间筛选</td>
+    </tr>
+    <tr>
+      <td>单条审核详情（含 token、延迟、prompt_version、extra）</td>
+      <td><code>GET /admin/stats/requests/:id</code></td>
+      <td>完整字段，含用户原文 biz_id / 自定义 extra</td>
+    </tr>
+    <tr>
+      <td>汇总统计（通过率 / token / 缓存命中率 / 状态分布）</td>
+      <td><code>GET /admin/stats/summary?from=&amp;to=&amp;app_id=</code></td>
+      <td>可按 app 过滤</td>
+    </tr>
+    <tr>
+      <td>被拒用户 Top N（反滥用）</td>
+      <td><code>GET /admin/stats/top-users?app_id=&amp;limit=20</code></td>
+      <td>按 reject 次数排序</td>
+    </tr>
+    <tr>
+      <td>回调投递记录</td>
+      <td><code>GET /admin/stats/callbacks?limit=50&amp;failed=1</code></td>
+      <td>每次投递的 http 状态 / 重试次数 / 最后错误</td>
+    </tr>
+    <tr>
+      <td>应用列表 / 详情</td>
+      <td><code>GET /admin/apps[/:id]</code></td>
+      <td>不返回 secret（只能查看），只能通过 rotate-secret 接口换发</td>
+    </tr>
+    <tr>
+      <td>Prompt 全部版本（含已回滚的）</td>
+      <td><code>GET /admin/prompts?biz_type=&amp;provider=</code></td>
+      <td>每个 biz_type × provider 的全版本列表 + content</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>9.2 原始数据库直读（应急排查）</h3>
+
+<pre><code># D1 直接 SQL（只读推荐；写操作须谨慎）
+wrangler d1 execute ai-guard --remote --command \
+  "SELECT * FROM moderation_requests WHERE app_id='app_xxx' ORDER BY created_at DESC LIMIT 20;"</code></pre>
+
+<h3>9.3 数据保留策略</h3>
+<table>
+  <thead><tr><th>表</th><th>保留</th><th>清理机制</th></tr></thead>
+  <tbody>
+    <tr><td>moderation_requests</td><td>90 天明细</td><td>Cron 每日 00:05 清理</td></tr>
+    <tr><td>callback_deliveries</td><td>90 天</td><td>同上</td></tr>
+    <tr><td>stats_rollup</td><td>day 级永久，hour 级 60 天</td><td>Cron（Phase 2+ 实装）</td></tr>
+    <tr><td>apps / prompts</td><td>永久</td><td>不自动清理，只能 disable</td></tr>
+  </tbody>
+</table>
+</section>
+
+<section id="deploy">
+<h2>10. 部署信息</h2>
+
+<div class="cards">
+  <div class="card">
+    <div class="k">Prod Worker</div>
+    <div class="v"><a href="https://ai-guard.schetkovvlad.workers.dev" style="color:var(--accent)">https://ai-guard.schetkovvlad.workers.dev</a></div>
+  </div>
+  <div class="card">
+    <div class="k">Dev Worker</div>
+    <div class="v"><a href="https://ai-guard-dev.schetkovvlad.workers.dev" style="color:var(--accent)">https://ai-guard-dev.schetkovvlad.workers.dev</a></div>
+  </div>
+  <div class="card">
+    <div class="k">文本模型</div>
+    <div class="v">grok-4-fast-non-reasoning</div>
+  </div>
+  <div class="card">
+    <div class="k">视觉模型</div>
+    <div class="v">gemini-2.5-flash</div>
+  </div>
+</div>
+
+<h3>10.1 状态快查</h3>
+<pre><code>GET  https://ai-guard.schetkovvlad.workers.dev/health
+→ {"ok":true,"ts":"...","version":"0.1.0"}</code></pre>
+
+<h3>10.2 绑定自定义域名（可选）</h3>
+<p>在 Cloudflare Dashboard → Workers &amp; Pages → <code>ai-guard</code> → Settings → Triggers → Add Custom Domain，填如 <code>ai.example.com</code>。域名需已在该 CF 账户。</p>
+
+</section>
+
+</main>
+
+<footer>
+  <div>Generated with ❤️ by ai-guard · Cloudflare edge</div>
+</footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
+    securityLevel: 'loose',
+    flowchart: { curve: 'basis' },
+    sequence: { showSequenceNumbers: false, messageMargin: 40 }
+  });
+</script>
+</body>
+</html>

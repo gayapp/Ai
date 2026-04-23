@@ -1,0 +1,141 @@
+# ai-guard — Cloudflare Worker 配置
+# 运行时资源绑定会在首次 `wrangler deploy` 前通过脚本 scripts/bootstrap-cf.sh 创建，
+# 然后把相应 id 回填到此文件。
+
+name = "ai-guard"
+main = "src/index.ts"
+compatibility_date = "2026-04-20"
+compatibility_flags = ["nodejs_compat"]
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+# === D1 ===
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-guard"
+database_id = "ffe14419-4eac-401a-9937-73c5e04ceb07"
+migrations_dir = "migrations"
+
+# === KV ===
+[[kv_namespaces]]
+binding = "DEDUP_CACHE"
+id = "b2f7a8be29fe4742b530d37452109be6"
+
+[[kv_namespaces]]
+binding = "PROMPTS"
+id = "26c98e113f69422499e55697cf9e35f7"
+
+[[kv_namespaces]]
+binding = "APPS"
+id = "ded80f8b3acf4cc5b13d482a7e844b50"
+
+[[kv_namespaces]]
+binding = "NONCE"
+id = "d238b6289c104643918c6a73e43e35c7"
+
+# === Queues ===
+[[queues.producers]]
+binding = "MODERATION_QUEUE"
+queue = "ai-guard-moderation"
+
+[[queues.producers]]
+binding = "CALLBACK_QUEUE"
+queue = "ai-guard-callback"
+
+[[queues.consumers]]
+queue = "ai-guard-moderation"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "ai-guard-moderation-dlq"
+
+[[queues.consumers]]
+queue = "ai-guard-callback"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "ai-guard-callback-dlq"
+
+# === Cron ===
+[triggers]
+crons = ["0 * * * *", "5 0 * * *"]
+
+# === Vars (non-secret) ===
+[vars]
+SYNC_TIMEOUT_MS = "10000"
+DEDUP_TTL_SECONDS = "604800"   # 7 days
+GROK_MODEL = "grok-4-fast-non-reasoning"
+GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_RATE_LIMIT_QPS = "50"
+LOG_LEVEL = "info"
+
+# === Observability ===
+[observability]
+enabled = true
+head_sampling_rate = 1.0
+
+# =============================================================
+# Dev environment
+# =============================================================
+[env.dev]
+name = "ai-guard-dev"
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "ai-guard-dev"
+database_id = "e07b8f19-cc85-4571-9ce1-96150936b119"
+migrations_dir = "migrations"
+
+[[env.dev.kv_namespaces]]
+binding = "DEDUP_CACHE"
+id = "03bd0d7c192e47ee87e8269c2b71a47a"
+
+[[env.dev.kv_namespaces]]
+binding = "PROMPTS"
+id = "7a83a472084846b6841d90618dca3771"
+
+[[env.dev.kv_namespaces]]
+binding = "APPS"
+id = "de87f0040ed14194a3c3536feacfa080"
+
+[[env.dev.kv_namespaces]]
+binding = "NONCE"
+id = "f0cf9dc5e5664005bbf18003547ccac6"
+
+[[env.dev.queues.producers]]
+binding = "MODERATION_QUEUE"
+queue = "ai-guard-dev-moderation"
+
+[[env.dev.queues.producers]]
+binding = "CALLBACK_QUEUE"
+queue = "ai-guard-dev-callback"
+
+[[env.dev.queues.consumers]]
+queue = "ai-guard-dev-moderation"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 3
+
+[[env.dev.queues.consumers]]
+queue = "ai-guard-dev-callback"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+
+[env.dev.vars]
+SYNC_TIMEOUT_MS = "10000"
+DEDUP_TTL_SECONDS = "604800"
+GROK_MODEL = "grok-4-fast-non-reasoning"
+GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_RATE_LIMIT_QPS = "50"
+LOG_LEVEL = "debug"
+
+[env.dev.observability]
+enabled = true
+head_sampling_rate = 1.0
+
+[env.dev.triggers]
+crons = ["0 * * * *"]

@@ -1,0 +1,6 @@
+# Copy to .dev.vars (gitignored) for `wrangler dev`.
+# Production secrets go via `wrangler secret put ...`, NOT this file.
+
+GROK_API_KEY=xai-your-local-dev-key
+GEMINI_API_KEY=AIza-your-local-dev-key
+ADMIN_TOKEN=dev-admin-token

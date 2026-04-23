@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+.wrangler/
+.dev.vars
+.mf/
+
+# Environments / secrets
+.env
+.env.*
+!.env.example
+
+# Claude local overrides — settings.json accumulates granted-permission
+# strings that may contain secrets, so don't share it. Skills/ IS shared.
+.claude/settings.json
+.claude/settings.local.json
+
+# Local secrets — never commit
+SECRETS.local.md
+*.local.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / tmp
+*.log
+tmp/
+.tmp/
+coverage/
+
+# Admin UI build
+admin-ui/dist/
+admin-ui/.vite/
