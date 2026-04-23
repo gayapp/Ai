@@ -7,7 +7,7 @@ export function getApiBase(): string {
   return (
     localStorage.getItem(BASE_KEY) ||
     // 默认用 prod 的自定义域名，开发时可在 Login 页手动覆盖成 localhost
-    "https://aicenter-api.gv.live"
+    "https://aicenter-api.1.gay"
   );
 }
 

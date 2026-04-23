@@ -63,7 +63,7 @@ wrangler secret put TELEGRAM_CHAT_ID --env dev
 错误数: 18
 错误率: 12.68%（阈值 5%）
 
-排查: https://aicenter.gv.live/#/requests?status=error
+排查: https://aicenter.1.gay/#/requests?status=error
 
 _2026-04-23T15:30:00.000Z_
 ```
@@ -72,10 +72,10 @@ _2026-04-23T15:30:00.000Z_
 
 ```bash
 # 发一条测试消息
-curl -X POST https://aicenter-api.gv.live/admin/alerts/test \
+curl -X POST https://aicenter-api.1.gay/admin/alerts/test \
   -H "authorization: Bearer $ADMIN_TOKEN"
 
 # 立即执行一次阈值检查（绕过 cron）
-curl -X POST https://aicenter-api.gv.live/admin/alerts/check \
+curl -X POST https://aicenter-api.1.gay/admin/alerts/check \
   -H "authorization: Bearer $ADMIN_TOKEN"
 ```

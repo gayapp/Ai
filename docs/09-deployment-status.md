@@ -5,6 +5,8 @@
 ## Worker
 
 - **Dev URL**：<https://ai-guard-dev.schetkovvlad.workers.dev>
+- **Prod URL**：<https://aicenter-api.1.gay> / <https://ai-guard.schetkovvlad.workers.dev>
+- **Admin Web UI**：<https://ai-guard-admin.pages.dev>（自定义域名 <https://aicenter.1.gay> 待 DNS 生效）
 - **健康检查**：`GET /health` → `{"ok":true,...}`
 - **绑定资源**（wrangler.toml `[env.dev]`）
 

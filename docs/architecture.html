@@ -477,11 +477,15 @@ wrangler d1 execute ai-guard --remote --command \
 
 <div class="cards">
   <div class="card">
-    <div class="k">Prod（自定义域名）</div>
-    <div class="v"><a href="https://aicenter.gv.live" style="color:var(--accent)">https://aicenter.gv.live</a></div>
+    <div class="k">Prod API（自定义域名）</div>
+    <div class="v"><a href="https://aicenter-api.1.gay" style="color:var(--accent)">https://aicenter-api.1.gay</a></div>
   </div>
   <div class="card">
-    <div class="k">Prod（默认 Workers 域）</div>
+    <div class="k">Admin Web UI</div>
+    <div class="v"><a href="https://aicenter.1.gay" style="color:var(--accent)">https://aicenter.1.gay</a> / <a href="https://ai-guard-admin.pages.dev" style="color:var(--accent)">pages.dev</a></div>
+  </div>
+  <div class="card">
+    <div class="k">Prod API（默认 Workers 域）</div>
     <div class="v"><a href="https://ai-guard.schetkovvlad.workers.dev" style="color:var(--accent)">https://ai-guard.schetkovvlad.workers.dev</a></div>
   </div>
   <div class="card">
@@ -499,11 +503,11 @@ wrangler d1 execute ai-guard --remote --command \
 </div>
 
 <h3>10.1 状态快查</h3>
-<pre><code>GET  https://aicenter.gv.live/health
+<pre><code>GET  https://aicenter-api.1.gay/health
 → {"ok":true,"ts":"...","version":"0.1.0"}</code></pre>
 
 <h3>10.2 自定义域名</h3>
-<p>Prod 已绑定 <code>aicenter.gv.live</code>（zone: gv.live）。Cloudflare Workers Custom Domain 会自动签发 SSL 证书并管理 DNS / 路由，无需手动加 A/CNAME 记录。</p>
+<p>Prod API 已绑定 <code>aicenter-api.1.gay</code>；Admin UI 目标域 <code>aicenter.1.gay</code>。Workers Custom Domain 自动签发 SSL + 路由；Pages 自定义域需要一条 CNAME 记录指向 <code>ai-guard-admin.pages.dev</code>。</p>
 <p>如需新增绑定：CF Dashboard → Workers &amp; Pages → <code>ai-guard</code> → Settings → Triggers → Add Custom Domain。</p>
 
 </section>

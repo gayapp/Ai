@@ -138,7 +138,7 @@ export async function checkAndAlert(
           `错误数: ${row.errors}`,
           `错误率: ${errRatePct.toFixed(2)}%（阈值 ${thresholds.errorRatePct}%）`,
           ``,
-          `排查: https://aicenter.gv.live/#/requests?status=error`,
+          `排查: https://aicenter.1.gay/#/requests?status=error`,
         ],
         dedupKey: `error-rate-${Math.floor(errRatePct / 5)}`,
       },

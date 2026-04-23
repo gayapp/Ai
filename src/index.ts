@@ -33,7 +33,8 @@ const app = new Hono<{ Bindings: Env }>({ strict: false });
 app.use("*", async (c, next): Promise<Response | void> => {
   const origin = c.req.header("origin");
   const allowed = new Set([
-    "https://aicenter.gv.live",
+    "https://aicenter.1.gay",
+    "https://ai-guard-admin.pages.dev",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
   ]);

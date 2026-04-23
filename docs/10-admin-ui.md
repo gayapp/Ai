@@ -3,12 +3,12 @@
 ## 访问地址
 
 - **默认 URL**：<https://ai-guard-admin.pages.dev>（立刻可用）
-- **自定义域名**：`https://aicenter.gv.live`（**待完成一步**，见下）
+- **自定义域名**：`https://aicenter.1.gay`（**待完成一步**，见下）
 
 ## 登录
 
 1. 打开 URL
-2. `API Base` 保留默认 `https://aicenter-api.gv.live`
+2. `API Base` 保留默认 `https://aicenter-api.1.gay`
 3. `ADMIN_TOKEN` 粘贴（从 `SECRETS.local.md` 或新建环境的 wrangler secret）
 4. Token 存浏览器 localStorage，登出会清
 
@@ -57,20 +57,20 @@ Pages 自定义域名已申请，但 DNS CNAME 记录需要 Zone:DNS:Edit 权限
 
 ### 方案 A · CF Dashboard 手动加 CNAME（推荐，30 秒）
 
-1. 打开 <https://dash.cloudflare.com/> → 选 `gv.live` 域 → DNS → Records
+1. 打开 <https://dash.cloudflare.com/> → 选 `1.gay` 域 → DNS → Records
 2. 点 "Add record"：
    - **Type**：`CNAME`
    - **Name**：`aicenter`
    - **Target**：`ai-guard-admin.pages.dev`
    - **Proxy**：✅ Proxied（橙云）
    - **TTL**：Auto
-3. 保存。2 分钟内 Pages 自动签发 SSL，`https://aicenter.gv.live` 生效
+3. 保存。2 分钟内 Pages 自动签发 SSL，`https://aicenter.1.gay` 生效
 
 ### 方案 B · 生成 DNS Edit Token 我自动做
 
 新建一个 API Token（My Profile → API Tokens → Create Token → Custom），权限：
 
-- Zone / DNS / Edit（对 `gv.live` 或 All zones）
+- Zone / DNS / Edit（对 `1.gay` 或 All zones）
 - Account / Cloudflare Pages / Edit
 - Account / Workers Scripts / Edit
 

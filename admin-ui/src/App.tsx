@@ -72,7 +72,7 @@ function Layout({ children, onLogout }: { children: React.ReactNode; onLogout: (
         </NavLink>
 
         <div className="nav-section">链接</div>
-        <a className="nav-item" href="https://aicenter-api.gv.live/architecture" target="_blank" rel="noreferrer">
+        <a className="nav-item" href="https://aicenter-api.1.gay/architecture" target="_blank" rel="noreferrer">
           📐 架构文档
         </a>
         <a className="nav-item" href="https://github.com/gayapp/Ai" target="_blank" rel="noreferrer">
