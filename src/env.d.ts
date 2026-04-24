@@ -31,6 +31,7 @@ declare global {
     GEMINI_MODEL: string;
     DEFAULT_RATE_LIMIT_QPS: string;
     LOG_LEVEL: string;
+    SAVE_EVIDENCE?: string; // "true" 才启用 R2 证据保存
   }
 }
 

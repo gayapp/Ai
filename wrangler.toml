@@ -76,6 +76,9 @@ GROK_MODEL = "grok-4-fast-non-reasoning"
 GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_RATE_LIMIT_QPS = "50"
 LOG_LEVEL = "info"
+# R2 证据保存（默认 off，避免在自己账号下保存头像原图引发合规风险）
+# 改为 "true" 即可开启，配合 Cloudflare Dashboard 里 R2 的 CSAM 扫描使用
+SAVE_EVIDENCE = "false"
 
 # === Observability ===
 [observability]
@@ -141,6 +144,7 @@ GROK_MODEL = "grok-4-fast-non-reasoning"
 GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_RATE_LIMIT_QPS = "50"
 LOG_LEVEL = "debug"
+SAVE_EVIDENCE = "false"
 
 [env.dev.observability]
 enabled = true

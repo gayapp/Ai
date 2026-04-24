@@ -13,7 +13,7 @@
 | 任务 | 状态 |
 |------|------|
 | P0.1 · 成人男同平台 prompt v3/v4（7 条 + nickname v4）| ✅ 已上线 |
-| P0.2 · Cloudflare CSAM 扫描 | ⚠️ **待你 Dashboard 开启**（5 分钟，[步骤](csam-scan-setup.md)） |
+| P0.2 · CSAM 合规 | ✅ **已改走方案 A**（不保存头像原图；详见 [csam-plan-a.md](csam-plan-a.md)） |
 | P1.1 · 边缘前置过滤漏斗（L1 低信噪 + L2 8 条广告规则） | ✅ 已上线 |
 | P1.2 · Grok Batch API 异步通道 | 🟦 暂缓（依赖物理服务器） |
 | P1.3 · 物理服务器辅助 | 🟦 **暂缓**（用户决定；架构设计已存） |
@@ -59,12 +59,15 @@
 - **状态**：✅ prod + dev 已发布 v3；回归测试 19/19 全绿；成人 NSFW / CSAM / 广告 / 政治 / 毒品 / 赌博 / 男同文化所有场景覆盖正确
 - **详见**：[prompts-adult-platform.md](prompts-adult-platform.md)
 
-#### P0.2 · Cloudflare CSAM 扫描集成 · ⚠️ **待你手动启用** · ⏱ 5 分钟
-- **问题**：儿童色情合规红线必须在图片到 R2 后立刻二次硬判；当前单靠 Gemini Vision 软判不够稳
-- **做法**：Cloudflare Dashboard 里对 R2 evidence bucket 开启 CSAM Scanning Tool
-- **状态**：⚠️ **需要你在 Dashboard 操作** — 我的 API Token 没有此操作权限
-- **详细步骤**：[csam-scan-setup.md](csam-scan-setup.md)
-- **评估**：合规刚需；Cloudflare 原生、免费；启用后扫描 + 自动 NCMEC 报告均由 CF 代办
+#### P0.2 · CSAM 合规 · ✅ **已改走方案 A**（2026-04-24）
+- **决策**：不启用 R2 CSAM 扫描，改为**根本不在自己账号保存头像原图**
+- **做法**：
+  - `SAVE_EVIDENCE=false` 全局关闭（prod + dev）
+  - 清空历史 R2 `ai-guard-evidence` 对象 + 清 D1 `evidence_key` 字段
+  - 代码保留 `saveAvatarEvidence` + R2 binding，环境变量一改即可恢复
+- **当前防线**：Gemini Vision prompt 里"疑似 <18 一律 reject，宁可错杀"
+- **决策记录**：[csam-plan-a.md](csam-plan-a.md)
+- **备选回到原方案**：Dashboard 开启 CSAM Scan + 改 `SAVE_EVIDENCE=true` 重部署，见 [csam-scan-setup.md](csam-scan-setup.md)
 
 ---
 

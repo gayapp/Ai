@@ -24,6 +24,8 @@
 ## 铁律
 
 0. **平台定位：成人男同社交 APP 的审核中间层。** 合法 NSFW / 性暗示 / 裸露 / 男同色情 **绝不 reject**。仅对 CSAM（未成年性化）/ 广告引流 / 毒品 / 赌博 / 政治敏感 零容忍。编写 prompt 时必须明确这点，default prompt（migration 0001/0002）需走 P0.1 改写升级到 v3。
+
+0.1 **R2 头像证据默认不保存**（方案 A 合规策略，2026-04-24 起）。`env.SAVE_EVIDENCE !== "true"` 时 `saveAvatarEvidence` 不被调用，`moderation_requests.evidence_key` 保持 null。未来如需开启，改 wrangler.toml 的 `SAVE_EVIDENCE = "true"` 并同步在 Dashboard 启用 R2 CSAM Scanning。决策详见 [docs/optimization/csam-plan-a.md](docs/optimization/csam-plan-a.md)。
 1. **回调 JSON schema 是对外契约。** 新增字段必须向后兼容；不得删字段或改字段含义；变更必过 [docs/04-callback-spec.md](docs/04-callback-spec.md)。
 2. **Prompt 只决定"如何判断"，不决定"输出结构"。** 结构由 [src/moderation/schema.ts](src/moderation/schema.ts) 的 Zod 锁定；模型返回不合规，整条标 `status=error`。
 3. **去重 KV key 必须含 `prompt_version`。** 否则 prompt 更新后旧缓存会污染结果。key 格式：`{biz_type}:{prompt_version}:{content_hash}`。

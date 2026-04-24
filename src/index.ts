@@ -203,8 +203,15 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
       const ttl = parseInt(env.DEDUP_TTL_SECONDS || "604800", 10);
       await putDedup(env.DEDUP_CACHE, kvKey, cacheable, ttl);
     }
-    // Best-effort: save avatar evidence to R2 (non-cached, non-error audits only)
-    if (isImage && !existing?.evidence_key && result.status !== "error") {
+    // R2 evidence 保存 — 方案 A 合规策略下默认关闭（env.SAVE_EVIDENCE !== "true"）
+    //   关闭：平台不在自己 CF 账号下保存头像原图，规避 CSAM 合规风险
+    //   启用：配合 Dashboard 里 R2 的 CSAM 扫描使用（见 docs/optimization/csam-scan-setup.md）
+    if (
+      isImage &&
+      !existing?.evidence_key &&
+      result.status !== "error" &&
+      env.SAVE_EVIDENCE === "true"
+    ) {
       const ev = await saveAvatarEvidence(env.EVIDENCE, job.request_id, job.content);
       if (ev) await setEvidenceKey(env.DB, job.request_id, ev.key);
     }
