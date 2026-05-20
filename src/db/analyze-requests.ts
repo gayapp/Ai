@@ -95,6 +95,17 @@ export async function completeAnalyze(
     .run();
 }
 
+export async function updateAnalyzeMode(
+  db: D1Database,
+  id: string,
+  mode: string,
+): Promise<void> {
+  await db
+    .prepare(`UPDATE analyze_requests SET mode = ? WHERE id = ?`)
+    .bind(mode, id)
+    .run();
+}
+
 export async function markAnalyzeDelivered(
   db: D1Database,
   id: string,

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { analyzeRouter } from "../src/routes/analyze.ts";
 import { analyzeRecordsRouter } from "../src/routes/analyze-records.ts";
 import { dispatchAnalyzeJob } from "../src/analyze/pipeline/dispatcher.ts";
@@ -110,6 +110,9 @@ class FakeStmt {
     if (this.sql.includes("FROM analyze_requests WHERE id = ?")) {
       return (this.db.analyzeRows.find((r) => r.id === this.args[0]) ?? null) as T | null;
     }
+    if (this.sql.includes("FROM prompts WHERE biz_type = ?")) {
+      return { version: 1, content: "base intro prompt" } as T;
+    }
     return null;
   }
   async all<T>(): Promise<{ results: T[] }> {
@@ -197,9 +200,14 @@ describe("analyze pull API", () => {
       DB: db,
       NONCE: new MemKV(),
       APPS: new MemKV(),
+      PROMPTS: new MemKV(),
+      DEDUP_CACHE: new MemKV(),
       ANALYZE_QUEUE: new MemQueue<AnalyzeJob>(),
       CALLBACK_QUEUE: new MemQueue<object>(),
       DEFAULT_RATE_LIMIT_QPS: "50",
+      DEDUP_TTL_SECONDS: "604800",
+      GROK_API_KEY: "grok-key",
+      GROK_MODEL: "grok-test",
     } as unknown as Env;
     app = new Hono<{ Bindings: Env }>({ strict: false });
     app.route("/", analyzeRouter);
@@ -212,11 +220,23 @@ describe("analyze pull API", () => {
     });
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   it("single query returns completed POST result for same app", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      model: "grok-test",
+      choices: [{ message: { content: JSON.stringify({ intro: "Intro generated" }) } }],
+      usage: { prompt_tokens: 1, completion_tokens: 2 },
+    })));
+
     const body = JSON.stringify({
       biz_type: "media_intro",
       biz_id: "intro-posted",
       input: { title: "Intro" },
+      mode: "async",
     });
     const post = await app.fetch(new Request("http://local/v1/analyze", {
       method: "POST",
@@ -232,11 +252,15 @@ describe("analyze pull API", () => {
       headers: await signedHeaders("app_a", "secret-a", "", nonceCounter++),
     }), env);
     expect(get.status).toBe(200);
-    const payload = await get.json() as { request_id: string; status: string; error_code: string };
+    const payload = await get.json() as {
+      request_id: string;
+      status: string;
+      result: { intro: string };
+    };
     expect(payload).toMatchObject({
       request_id: accepted.request_id,
-      status: "error",
-      error_code: "not_implemented",
+      status: "ok",
+      result: { intro: "Intro generated" },
     });
   });
 
