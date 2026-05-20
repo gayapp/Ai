@@ -1,6 +1,7 @@
 import type { BizType } from "./schema.ts";
 
 export type ProviderStrategy = "auto" | "grok" | "gemini" | "round_robin";
+export type DeliveryMode = "callback" | "pull" | "both";
 
 export interface AppConfig {
   id: string;
@@ -8,6 +9,9 @@ export interface AppConfig {
   secret: string;
   callback_url: string | null;
   biz_types: string[];
+  analyze_biz_types: string[];
+  delivery_mode: DeliveryMode;
+  callback_max_concurrency: number;
   rate_limit_qps: number;
   disabled: boolean;
   provider_strategy: ProviderStrategy;

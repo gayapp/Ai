@@ -50,6 +50,10 @@ queue = "ai-guard-moderation"
 binding = "CALLBACK_QUEUE"
 queue = "ai-guard-callback"
 
+[[queues.producers]]
+binding = "ANALYZE_QUEUE"
+queue = "ai-guard-analyze"
+
 [[queues.consumers]]
 queue = "ai-guard-moderation"
 max_batch_size = 10
@@ -63,6 +67,13 @@ max_batch_size = 10
 max_batch_timeout = 5
 max_retries = 5
 dead_letter_queue = "ai-guard-callback-dlq"
+
+[[queues.consumers]]
+queue = "ai-guard-analyze"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "ai-guard-analyze-dlq"
 
 # === Cron ===
 [triggers]
@@ -125,6 +136,10 @@ queue = "ai-guard-dev-moderation"
 binding = "CALLBACK_QUEUE"
 queue = "ai-guard-dev-callback"
 
+[[env.dev.queues.producers]]
+binding = "ANALYZE_QUEUE"
+queue = "ai-guard-dev-analyze"
+
 [[env.dev.queues.consumers]]
 queue = "ai-guard-dev-moderation"
 max_batch_size = 10
@@ -136,6 +151,12 @@ queue = "ai-guard-dev-callback"
 max_batch_size = 10
 max_batch_timeout = 5
 max_retries = 5
+
+[[env.dev.queues.consumers]]
+queue = "ai-guard-dev-analyze"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 3
 
 [env.dev.vars]
 SYNC_TIMEOUT_MS = "10000"

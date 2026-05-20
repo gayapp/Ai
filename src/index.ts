@@ -4,6 +4,8 @@ import { AppError, ErrorCodes } from "./lib/errors.ts";
 import { checkAndAlert, sendTelegramAlert } from "./alerts/telegram.ts";
 import { checkProviderHealth } from "./alerts/provider-health.ts";
 import { moderateRouter } from "./routes/moderate.ts";
+import { analyzeRouter } from "./routes/analyze.ts";
+import { analyzeRecordsRouter } from "./routes/analyze-records.ts";
 import { adminAppsRouter } from "./routes/admin-apps.ts";
 import { adminPromptsRouter } from "./routes/admin-prompts.ts";
 import { adminStatsRouter } from "./routes/admin-stats.ts";
@@ -27,6 +29,8 @@ import { CachedResult } from "./moderation/schema.ts";
 import { processCallback } from "./callback/dispatcher.ts";
 import { saveAvatarEvidence } from "./evidence/r2.ts";
 import { rollupYesterday } from "./stats/rollup.ts";
+import { dispatchAnalyzeJob } from "./analyze/pipeline/dispatcher.ts";
+import type { AnalyzeJob } from "./analyze/types.ts";
 import type { CallbackJob, ModerationJob } from "./moderation/types.ts";
 
 // ==========================================================
@@ -73,6 +77,8 @@ app.get("/architecture", (c) =>
 );
 
 app.route("/", moderateRouter);
+app.route("/", analyzeRouter);
+app.route("/", analyzeRecordsRouter);
 app.route("/admin/apps", adminAppsRouter);
 app.route("/admin/prompts", adminPromptsRouter);
 app.route("/admin/stats", adminStatsRouter);
@@ -253,6 +259,21 @@ async function handleCallbackQueue(
   }
 }
 
+async function handleAnalyzeQueue(
+  batch: MessageBatch<AnalyzeJob>,
+  env: Env,
+): Promise<void> {
+  for (const msg of batch.messages) {
+    try {
+      await dispatchAnalyzeJob(env, msg.body);
+      msg.ack();
+    } catch (e) {
+      console.error("[analyze-queue] failed", msg.body.request_id, e);
+      msg.retry({ delaySeconds: 30 });
+    }
+  }
+}
+
 // ==========================================================
 // Scheduled (MVP: simple hourly KV cleanup — stats rollup to be added)
 // ==========================================================
@@ -364,6 +385,8 @@ const handler: ExportedHandler<Env> = {
   async queue(batch, env) {
     if (batch.queue.endsWith("moderation")) {
       await handleModerationQueue(batch as unknown as MessageBatch<ModerationJob>, env);
+    } else if (batch.queue.endsWith("analyze")) {
+      await handleAnalyzeQueue(batch as unknown as MessageBatch<AnalyzeJob>, env);
     } else if (batch.queue.endsWith("callback")) {
       await handleCallbackQueue(batch as unknown as MessageBatch<CallbackJob>, env);
     } else {

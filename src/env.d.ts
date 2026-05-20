@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import type { AnalyzeJob } from "./analyze/types.ts";
 import type { ModerationJob, CallbackJob } from "./moderation/types.ts";
 
 declare global {
@@ -12,6 +13,7 @@ declare global {
     NONCE: KVNamespace;
 
     MODERATION_QUEUE: Queue<ModerationJob>;
+    ANALYZE_QUEUE: Queue<AnalyzeJob>;
     CALLBACK_QUEUE: Queue<CallbackJob>;
 
     EVIDENCE: R2Bucket;

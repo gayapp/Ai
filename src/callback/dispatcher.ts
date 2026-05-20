@@ -3,9 +3,17 @@ import {
   loadAppCached,
   recordCallbackResult,
   upsertCallbackDelivery,
+  type ModerationRow,
 } from "../db/queries.ts";
+import {
+  getAnalyzeById,
+  markAnalyzeDelivered,
+} from "../db/analyze-requests.ts";
+import { AnalyzeCallbackBody, type AnalyzeCallbackBody as AnalyzeCallbackBodyT } from "../analyze/schema/callback.ts";
+import { analyzeErrorMessage } from "../analyze/pipeline/dispatcher.ts";
+import type { AnalyzeRow } from "../analyze/types.ts";
 import { CallbackBody, Category, RiskLevel, type CallbackBody as CallbackBodyT } from "../moderation/schema.ts";
-import type { CallbackJob } from "../moderation/types.ts";
+import type { AppConfig, CallbackJob } from "../moderation/types.ts";
 import { signCallbackBody } from "./signer.ts";
 
 /** Backoff schedule (minutes) — 1, 5, 30, 120, 720. */
@@ -14,6 +22,25 @@ const MAX_ATTEMPTS = BACKOFF_MIN.length;
 
 export async function processCallback(env: Env, job: CallbackJob): Promise<void> {
   const row = await getModerationById(env.DB, job.request_id);
+  if (row) {
+    await processModerationCallback(env, job, row);
+    return;
+  }
+
+  const analyze = await getAnalyzeById(env.DB, job.request_id);
+  if (analyze) {
+    await processAnalyzeCallback(env, job, analyze);
+    return;
+  }
+
+  console.warn("[callback] request not found", job.request_id);
+}
+
+async function processModerationCallback(
+  env: Env,
+  job: CallbackJob,
+  row: ModerationRow,
+): Promise<void> {
   if (!row) {
     console.warn("[callback] moderation not found", job.request_id);
     return;
@@ -28,8 +55,6 @@ export async function processCallback(env: Env, job: CallbackJob): Promise<void>
     console.warn("[callback] no url for", job.request_id);
     return;
   }
-
-  await upsertCallbackDelivery(env.DB, row.id, url);
 
   const body: CallbackBodyT = CallbackBody.parse({
     schema_version: "1.0",
@@ -52,9 +77,85 @@ export async function processCallback(env: Env, job: CallbackJob): Promise<void>
     created_at: new Date(row.completed_at ?? row.created_at).toISOString(),
   });
 
+  await postSignedCallback(env, job, app, row.id, url, body);
+}
+
+async function processAnalyzeCallback(
+  env: Env,
+  job: CallbackJob,
+  row: AnalyzeRow,
+): Promise<void> {
+  if (row.delivery_mode === "pull") {
+    return;
+  }
+  const app = await loadAppCached(env, row.app_id);
+  if (!app) {
+    console.warn("[callback] app not found", row.app_id);
+    return;
+  }
+  const url = row.callback_url || app.callback_url;
+  if (!url) {
+    console.warn("[callback] no url for", job.request_id);
+    return;
+  }
+
+  const status = row.status === "ok" ? "ok" : "error";
+  const result = status === "ok" && row.result_json ? safeJson(row.result_json) : undefined;
+  const body: AnalyzeCallbackBodyT = AnalyzeCallbackBody.parse({
+    schema_version: "1.1",
+    request_id: row.id,
+    app_id: row.app_id,
+    biz_type: row.biz_type,
+    biz_id: row.biz_id,
+    user_id: row.user_id,
+    status,
+    ...(result ? { result } : {}),
+    ...(status === "error" ? {
+      error_code: row.error_code ?? "unknown",
+      message: analyzeErrorMessage(row.error_code),
+    } : {}),
+    provider: toAnalyzeProviderOrNull(row.provider),
+    model: row.model,
+    prompt_version: row.prompt_version,
+    cached: !!row.cached,
+    tokens: { input: row.input_tokens ?? 0, output: row.output_tokens ?? 0 },
+    latency_ms: row.latency_ms ?? 0,
+    delivery_mode: row.delivery_mode ?? "both",
+    extra: row.extra_json ? safeJson(row.extra_json) : undefined,
+    created_at: new Date(row.completed_at ?? row.created_at).toISOString(),
+  });
+
+  await postSignedCallback(env, job, app, row.id, url, body, async (deliveredAt) => {
+    await markAnalyzeDelivered(env.DB, row.id, deliveredAt);
+  });
+}
+
+async function postSignedCallback(
+  env: Env,
+  job: CallbackJob,
+  app: AppConfig,
+  requestId: string,
+  url: string,
+  body: CallbackBodyT | AnalyzeCallbackBodyT,
+  onDelivered?: (deliveredAt: number) => Promise<void>,
+): Promise<void> {
+  await upsertCallbackDelivery(env.DB, requestId, url);
+
+  const acquired = await acquireCallbackSlot(
+    env.DEDUP_CACHE,
+    app.id,
+    app.callback_max_concurrency,
+  );
+  if (!acquired) {
+    await env.CALLBACK_QUEUE.send(
+      { request_id: requestId, attempt: job.attempt },
+      { delaySeconds: 5 },
+    );
+    return;
+  }
+
   const rawBody = JSON.stringify(body);
   const signature = await signCallbackBody(app.secret, rawBody);
-
   const attemptsNow = job.attempt + 1;
   const startedAt = Date.now();
   let status_code: number | null = null;
@@ -64,8 +165,8 @@ export async function processCallback(env: Env, job: CallbackJob): Promise<void>
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-app-id": row.app_id,
-        "x-request-id": row.id,
+        "x-app-id": app.id,
+        "x-request-id": requestId,
         "x-timestamp": Math.floor(startedAt / 1000).toString(),
         "x-signature": signature,
       },
@@ -74,22 +175,26 @@ export async function processCallback(env: Env, job: CallbackJob): Promise<void>
     });
     status_code = res.status;
     if (res.ok) {
-      await recordCallbackResult(env.DB, row.id, {
+      const deliveredAt = Date.now();
+      await recordCallbackResult(env.DB, requestId, {
         status_code,
         attempts: attemptsNow,
         last_error: null,
-        delivered_at: Date.now(),
+        delivered_at: deliveredAt,
         next_retry_at: null,
       });
+      if (onDelivered) await onDelivered(deliveredAt);
       return;
     }
     last_error = `http ${res.status}`;
   } catch (e) {
     last_error = e instanceof Error ? e.message : String(e);
+  } finally {
+    await releaseCallbackSlot(env.DEDUP_CACHE, app.id);
   }
 
   if (attemptsNow >= MAX_ATTEMPTS) {
-    await recordCallbackResult(env.DB, row.id, {
+    await recordCallbackResult(env.DB, requestId, {
       status_code,
       attempts: attemptsNow,
       last_error: `final: ${last_error}`,
@@ -101,7 +206,7 @@ export async function processCallback(env: Env, job: CallbackJob): Promise<void>
 
   const nextDelayMin = BACKOFF_MIN[attemptsNow] ?? BACKOFF_MIN[BACKOFF_MIN.length - 1]!;
   const nextRetryAt = Date.now() + nextDelayMin * 60 * 1000;
-  await recordCallbackResult(env.DB, row.id, {
+  await recordCallbackResult(env.DB, requestId, {
     status_code,
     attempts: attemptsNow,
     last_error,
@@ -111,7 +216,7 @@ export async function processCallback(env: Env, job: CallbackJob): Promise<void>
 
   // Re-enqueue with explicit delay; throwing also triggers Queue retry
   await env.CALLBACK_QUEUE.send(
-    { request_id: row.id, attempt: attemptsNow },
+    { request_id: requestId, attempt: attemptsNow },
     { delaySeconds: nextDelayMin * 60 },
   );
 }
@@ -141,10 +246,33 @@ function toProviderOrNull(s: string | null): "grok" | "gemini" | null {
   return s === "grok" || s === "gemini" ? s : null;
 }
 
+function toAnalyzeProviderOrNull(s: string | null): "grok" | "gemini" | "xai" | null {
+  return s === "grok" || s === "gemini" || s === "xai" ? s : null;
+}
+
 function safeJson(s: string): Record<string, unknown> | undefined {
   try {
     return JSON.parse(s) as Record<string, unknown>;
   } catch {
     return undefined;
   }
+}
+
+async function acquireCallbackSlot(
+  kv: KVNamespace,
+  appId: string,
+  maxConcurrency: number,
+): Promise<boolean> {
+  const key = `callback:inflight:${appId}`;
+  const max = Math.max(1, maxConcurrency || 10);
+  const current = parseInt((await kv.get(key)) ?? "0", 10);
+  if (current >= max) return false;
+  await kv.put(key, String(current + 1), { expirationTtl: 60 });
+  return true;
+}
+
+async function releaseCallbackSlot(kv: KVNamespace, appId: string): Promise<void> {
+  const key = `callback:inflight:${appId}`;
+  const current = parseInt((await kv.get(key)) ?? "0", 10);
+  await kv.put(key, String(Math.max(0, current - 1)), { expirationTtl: 60 });
 }

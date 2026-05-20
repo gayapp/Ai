@@ -11,6 +11,7 @@ import {
   updateAppFields,
   updateAppSecret,
 } from "../db/queries.ts";
+import { ANALYZE_BIZ_TYPES, DELIVERY_MODE } from "../analyze/schema/envelope.ts";
 import { BizType } from "../moderation/schema.ts";
 import type { AppConfig } from "../moderation/types.ts";
 
@@ -22,13 +23,20 @@ adminAppsRouter.use("*", async (c, next) => {
 });
 
 const ProviderStrategyEnum = z.enum(["auto", "grok", "gemini", "round_robin"]);
+const AnalyzeBizType = z.enum(ANALYZE_BIZ_TYPES);
+const DeliveryModeEnum = z.enum(DELIVERY_MODE);
 
 const CreateAppSchema = z.object({
   name: z.string().min(1).max(128),
   callback_url: z.string().url().optional(),
-  biz_types: z.array(BizType).min(1),
+  biz_types: z.array(BizType).default([]),
+  analyze_biz_types: z.array(AnalyzeBizType).default([]),
+  delivery_mode: DeliveryModeEnum.optional(),
+  callback_max_concurrency: z.number().int().min(1).max(100).optional(),
   rate_limit_qps: z.number().int().min(1).max(10_000).optional(),
   provider_strategy: ProviderStrategyEnum.optional(),
+}).refine((v) => v.biz_types.length > 0 || v.analyze_biz_types.length > 0, {
+  message: "at least one biz_type or analyze_biz_type is required",
 });
 
 adminAppsRouter.post("/", async (c) => {
@@ -42,6 +50,9 @@ adminAppsRouter.post("/", async (c) => {
     secret,
     callback_url: body.callback_url ?? null,
     biz_types: body.biz_types,
+    analyze_biz_types: body.analyze_biz_types,
+    delivery_mode: body.delivery_mode ?? "both",
+    callback_max_concurrency: body.callback_max_concurrency ?? 10,
     rate_limit_qps: body.rate_limit_qps ?? defaultQps,
     disabled: false,
     provider_strategy: body.provider_strategy ?? "auto",
@@ -54,6 +65,9 @@ adminAppsRouter.post("/", async (c) => {
       secret,
       callback_url: app.callback_url,
       biz_types: app.biz_types,
+      analyze_biz_types: app.analyze_biz_types,
+      delivery_mode: app.delivery_mode,
+      callback_max_concurrency: app.callback_max_concurrency,
       rate_limit_qps: app.rate_limit_qps,
       provider_strategy: app.provider_strategy,
       created_at: new Date().toISOString(),
@@ -70,6 +84,9 @@ adminAppsRouter.get("/", async (c) => {
       name: a.name,
       callback_url: a.callback_url,
       biz_types: a.biz_types,
+      analyze_biz_types: a.analyze_biz_types,
+      delivery_mode: a.delivery_mode,
+      callback_max_concurrency: a.callback_max_concurrency,
       rate_limit_qps: a.rate_limit_qps,
       disabled: a.disabled,
       provider_strategy: a.provider_strategy,
@@ -85,6 +102,9 @@ adminAppsRouter.get("/:id", async (c) => {
     name: app.name,
     callback_url: app.callback_url,
     biz_types: app.biz_types,
+    analyze_biz_types: app.analyze_biz_types,
+    delivery_mode: app.delivery_mode,
+    callback_max_concurrency: app.callback_max_concurrency,
     rate_limit_qps: app.rate_limit_qps,
     disabled: app.disabled,
     provider_strategy: app.provider_strategy,
@@ -94,7 +114,10 @@ adminAppsRouter.get("/:id", async (c) => {
 const PatchAppSchema = z.object({
   name: z.string().min(1).max(128).optional(),
   callback_url: z.string().url().nullable().optional(),
-  biz_types: z.array(BizType).min(1).optional(),
+  biz_types: z.array(BizType).optional(),
+  analyze_biz_types: z.array(AnalyzeBizType).optional(),
+  delivery_mode: DeliveryModeEnum.optional(),
+  callback_max_concurrency: z.number().int().min(1).max(100).optional(),
   rate_limit_qps: z.number().int().min(1).max(10_000).optional(),
   disabled: z.boolean().optional(),
   provider_strategy: ProviderStrategyEnum.optional(),
@@ -109,6 +132,9 @@ adminAppsRouter.patch("/:id", async (c) => {
     ...(body.name !== undefined ? { name: body.name } : {}),
     ...(body.callback_url !== undefined ? { callback_url: body.callback_url ?? null } : {}),
     ...(body.biz_types !== undefined ? { biz_types: body.biz_types } : {}),
+    ...(body.analyze_biz_types !== undefined ? { analyze_biz_types: body.analyze_biz_types } : {}),
+    ...(body.delivery_mode !== undefined ? { delivery_mode: body.delivery_mode } : {}),
+    ...(body.callback_max_concurrency !== undefined ? { callback_max_concurrency: body.callback_max_concurrency } : {}),
     ...(body.rate_limit_qps !== undefined ? { rate_limit_qps: body.rate_limit_qps } : {}),
     ...(body.disabled !== undefined ? { disabled: body.disabled } : {}),
     ...(body.provider_strategy !== undefined ? { provider_strategy: body.provider_strategy } : {}),

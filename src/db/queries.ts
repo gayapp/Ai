@@ -1,4 +1,4 @@
-import type { AppConfig, ProviderStrategy } from "../moderation/types.ts";
+import type { AppConfig, DeliveryMode, ProviderStrategy } from "../moderation/types.ts";
 import type { BizType, Provider, Status } from "../moderation/schema.ts";
 
 // =============================================================
@@ -11,6 +11,9 @@ export interface AppRow {
   secret: string;
   callback_url: string | null;
   biz_types: string;
+  analyze_biz_types?: string;
+  delivery_mode?: string;
+  callback_max_concurrency?: number;
   rate_limit_qps: number;
   disabled: number;
   provider_strategy: string;
@@ -20,8 +23,10 @@ export interface AppRow {
 export async function insertApp(db: D1Database, a: AppConfig): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO apps (id, name, secret, callback_url, biz_types, rate_limit_qps, disabled, provider_strategy, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO apps
+       (id, name, secret, callback_url, biz_types, analyze_biz_types, delivery_mode,
+        callback_max_concurrency, rate_limit_qps, disabled, provider_strategy, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       a.id,
@@ -29,6 +34,9 @@ export async function insertApp(db: D1Database, a: AppConfig): Promise<void> {
       a.secret,
       a.callback_url,
       JSON.stringify(a.biz_types),
+      JSON.stringify(a.analyze_biz_types),
+      a.delivery_mode,
+      a.callback_max_concurrency,
       a.rate_limit_qps,
       a.disabled ? 1 : 0,
       a.provider_strategy,
@@ -56,7 +64,10 @@ export async function updateAppSecret(db: D1Database, id: string, secret: string
 export async function updateAppFields(
   db: D1Database,
   id: string,
-  fields: Partial<Pick<AppConfig, "name" | "callback_url" | "biz_types" | "rate_limit_qps" | "disabled" | "provider_strategy">>,
+  fields: Partial<Pick<AppConfig,
+    "name" | "callback_url" | "biz_types" | "analyze_biz_types" | "delivery_mode" |
+    "callback_max_concurrency" | "rate_limit_qps" | "disabled" | "provider_strategy"
+  >>,
 ): Promise<void> {
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -71,6 +82,18 @@ export async function updateAppFields(
   if (fields.biz_types !== undefined) {
     sets.push("biz_types = ?");
     vals.push(JSON.stringify(fields.biz_types));
+  }
+  if ("analyze_biz_types" in fields && fields.analyze_biz_types !== undefined) {
+    sets.push("analyze_biz_types = ?");
+    vals.push(JSON.stringify(fields.analyze_biz_types));
+  }
+  if ("delivery_mode" in fields && fields.delivery_mode !== undefined) {
+    sets.push("delivery_mode = ?");
+    vals.push(fields.delivery_mode);
+  }
+  if ("callback_max_concurrency" in fields && fields.callback_max_concurrency !== undefined) {
+    sets.push("callback_max_concurrency = ?");
+    vals.push(fields.callback_max_concurrency);
   }
   if (fields.rate_limit_qps !== undefined) {
     sets.push("rate_limit_qps = ?");
@@ -91,16 +114,30 @@ export async function updateAppFields(
 
 function rowToAppConfig(r: AppRow): AppConfig {
   const strat = (r.provider_strategy || "auto") as ProviderStrategy;
-  return {
+  const delivery = (r.delivery_mode || "both") as DeliveryMode;
+  return normalizeAppConfig({
     id: r.id,
     name: r.name,
     secret: r.secret,
     callback_url: r.callback_url,
     biz_types: JSON.parse(r.biz_types) as string[],
+    analyze_biz_types: safeJsonArray(r.analyze_biz_types, []),
+    delivery_mode: (["callback", "pull", "both"].includes(delivery) ? delivery : "both") as DeliveryMode,
+    callback_max_concurrency: Math.max(1, r.callback_max_concurrency ?? 10),
     rate_limit_qps: r.rate_limit_qps,
     disabled: !!r.disabled,
     provider_strategy: (["auto","grok","gemini","round_robin"].includes(strat) ? strat : "auto") as ProviderStrategy,
-  };
+  });
+}
+
+function safeJsonArray(raw: string | undefined, fallback: string[]): string[] {
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 // =============================================================
@@ -508,7 +545,7 @@ export async function loadAppCached(env: Env, app_id: string): Promise<AppConfig
   const cached = await env.APPS.get(key);
   if (cached) {
     try {
-      return JSON.parse(cached) as AppConfig;
+      return normalizeAppConfig(JSON.parse(cached) as Partial<AppConfig> & Pick<AppConfig, "id" | "name" | "secret">);
     } catch {
       // fall through and reload
     }
@@ -518,6 +555,24 @@ export async function loadAppCached(env: Env, app_id: string): Promise<AppConfig
     await env.APPS.put(key, JSON.stringify(row), { expirationTtl: APP_KV_TTL });
   }
   return row;
+}
+
+function normalizeAppConfig(raw: Partial<AppConfig> & Pick<AppConfig, "id" | "name" | "secret">): AppConfig {
+  const strat = raw.provider_strategy ?? "auto";
+  const delivery = raw.delivery_mode ?? "both";
+  return {
+    id: raw.id,
+    name: raw.name,
+    secret: raw.secret,
+    callback_url: raw.callback_url ?? null,
+    biz_types: raw.biz_types ?? [],
+    analyze_biz_types: raw.analyze_biz_types ?? [],
+    delivery_mode: (["callback", "pull", "both"].includes(delivery) ? delivery : "both") as DeliveryMode,
+    callback_max_concurrency: Math.max(1, raw.callback_max_concurrency ?? 10),
+    rate_limit_qps: raw.rate_limit_qps ?? 50,
+    disabled: raw.disabled ?? false,
+    provider_strategy: (["auto", "grok", "gemini", "round_robin"].includes(strat) ? strat : "auto") as ProviderStrategy,
+  };
 }
 
 export async function invalidateAppCache(env: Env, app_id: string): Promise<void> {
