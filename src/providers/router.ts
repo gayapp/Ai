@@ -1,5 +1,6 @@
 import { createGrokAdapter } from "./grok.ts";
 import { createGeminiAdapter } from "./gemini.ts";
+import type { AnalyzeBizType, AnalyzeProvider } from "../analyze/types.ts";
 import type { BizType, Provider } from "../moderation/schema.ts";
 import type { ProviderStrategy } from "../moderation/types.ts";
 
@@ -28,6 +29,16 @@ const DEFAULT_ROUTE: Record<BizType, { primary: Provider; fallback: Provider | n
   nickname: { primary: "grok", fallback: "gemini" },
   bio: { primary: "grok", fallback: "gemini" },
   avatar: { primary: "gemini", fallback: null }, // image → Gemini only (Grok text fallback useless)
+};
+
+export interface AnalyzeRoute {
+  primary: AnalyzeProvider;
+  fallback: AnalyzeProvider | null;
+}
+
+const DEFAULT_ANALYZE_ROUTE: Record<AnalyzeBizType, AnalyzeRoute> = {
+  media_analysis: { primary: "gemini", fallback: "xai" },
+  media_intro: { primary: "xai", fallback: "gemini" },
 };
 
 /**
@@ -63,6 +74,35 @@ export function resolveRoute(
 /** @deprecated 用 resolveRoute(biz, strategy) 替代 */
 export function getRoute(biz: BizType): { primary: Provider; fallback: Provider | null } {
   return DEFAULT_ROUTE[biz];
+}
+
+export function resolveAnalyzeRoute(
+  biz: AnalyzeBizType,
+  strategy: ProviderStrategy = "auto",
+): AnalyzeRoute {
+  const route = DEFAULT_ANALYZE_ROUTE[biz];
+  switch (strategy) {
+    case "gemini":
+      return {
+        primary: "gemini",
+        fallback: route.primary === "gemini" ? route.fallback : route.primary,
+      };
+    case "grok":
+      return {
+        primary: "xai",
+        fallback: route.primary === "xai" ? route.fallback : route.primary,
+      };
+    case "round_robin": {
+      const primary: AnalyzeProvider = (Math.floor(Date.now() / 1000) % 2 === 0)
+        ? "xai"
+        : "gemini";
+      const fallback: AnalyzeProvider = primary === "xai" ? "gemini" : "xai";
+      return { primary, fallback };
+    }
+    case "auto":
+    default:
+      return route;
+  }
 }
 
 export function getAdapter(env: Env, provider: Provider): ProviderAdapter {

@@ -214,9 +214,9 @@ describe("analyze pull API", () => {
 
   it("single query returns completed POST result for same app", async () => {
     const body = JSON.stringify({
-      biz_type: "media_analysis",
-      biz_id: "video-posted",
-      input: { image_urls: ["https://cdn.example.com/1.jpg"] },
+      biz_type: "media_intro",
+      biz_id: "intro-posted",
+      input: { title: "Intro" },
     });
     const post = await app.fetch(new Request("http://local/v1/analyze", {
       method: "POST",
