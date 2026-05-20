@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { processCallback } from "../src/callback/dispatcher.ts";
 import { dispatchAnalyzeJob } from "../src/analyze/pipeline/dispatcher.ts";
 import { callGeminiMediaAnalysis } from "../src/analyze/providers/gemini-media.ts";
+import { callXaiMediaAnalysis } from "../src/analyze/providers/xai-media.ts";
 import {
   MediaAnalysisInput,
   MediaAnalysisOutput,
@@ -9,6 +10,7 @@ import {
 } from "../src/analyze/schema/media-analysis.ts";
 import type { AnalyzeRow } from "../src/analyze/types.ts";
 import { ErrorCodes, type AppError } from "../src/lib/errors.ts";
+import { canTry } from "../src/providers/circuit.ts";
 import { resolveAnalyzeRoute } from "../src/providers/router.ts";
 
 class MemKV {
@@ -25,7 +27,10 @@ class MemQueue<T> {
 
 class FakeD1 {
   readonly rows: AnalyzeRow[] = [];
-  prompt = { version: 1, content: "base media prompt" };
+  prompts = {
+    gemini: { version: 1, content: "base gemini media prompt" },
+    xai: { version: 1, content: "base xai media prompt" },
+  };
 
   prepare(sql: string): FakeStmt {
     return new FakeStmt(this, sql);
@@ -44,7 +49,8 @@ class FakeStmt {
       return (this.db.rows.find((r) => r.id === this.args[0]) ?? null) as T | null;
     }
     if (this.sql.includes("FROM prompts WHERE biz_type = ?")) {
-      return this.db.prompt as T;
+      const provider = this.args[1] === "xai" ? "xai" : "gemini";
+      return this.db.prompts[provider] as T;
     }
     return null;
   }
@@ -188,6 +194,45 @@ describe("Gemini media provider", () => {
   });
 });
 
+describe("xAI media provider", () => {
+  it("uses public image_url parts and JSON mode", async () => {
+    let body: unknown;
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      body = JSON.parse(init.body as string);
+      return xaiResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await callXaiMediaAnalysis({
+      GROK_API_KEY: "key",
+      GROK_MEDIA_MODEL: "grok-test",
+    } as unknown as Env, {
+      prompt: "prompt",
+      input: { image_urls: ["https://cdn.example.com/1.jpg"] },
+      timeoutMs: 1000,
+    });
+
+    expect(res.model).toBe("grok-test");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(body).toMatchObject({
+      model: "grok-test",
+      response_format: { type: "json_object" },
+      messages: [{
+        content: [
+          {
+            type: "image_url",
+            image_url: {
+              url: "https://cdn.example.com/1.jpg",
+              detail: "high",
+            },
+          },
+          { type: "text", text: "prompt" },
+        ],
+      }],
+    });
+  });
+});
+
 describe("media_analysis pipeline", () => {
   it("writes ok result, enqueues callback, and hits KV dedup on identical input", async () => {
     const db = new FakeD1();
@@ -203,6 +248,7 @@ describe("media_analysis pipeline", () => {
 
     const env = {
       DB: db,
+      NONCE: new MemKV(),
       PROMPTS: new MemKV(),
       DEDUP_CACHE: dedup,
       CALLBACK_QUEUE: callbackQueue,
@@ -274,6 +320,7 @@ describe("media_analysis pipeline", () => {
     const env = {
       DB: db,
       APPS: apps,
+      NONCE: new MemKV(),
       PROMPTS: new MemKV(),
       DEDUP_CACHE: new MemKV(),
       CALLBACK_QUEUE: callbackQueue,
@@ -340,6 +387,80 @@ describe("media_analysis pipeline", () => {
     });
   });
 
+  it("opens Gemini media circuit, uses xAI fallback, then probes Gemini after 30s", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    const db = new FakeD1();
+    const nonce = new MemKV();
+    const dedup = new MemKV();
+    const callbackQueue = new MemQueue<object>();
+    let geminiHealthy = false;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("generativelanguage.googleapis.com")) {
+        if (!geminiHealthy) return new Response("temporary", { status: 503 });
+        return geminiResponse();
+      }
+      if (url.includes("api.x.ai")) {
+        return xaiResponse();
+      }
+      return new Response("unexpected url", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const env = {
+      DB: db,
+      NONCE: nonce,
+      PROMPTS: new MemKV(),
+      DEDUP_CACHE: dedup,
+      CALLBACK_QUEUE: callbackQueue,
+      GEMINI_API_KEY: "gemini-key",
+      GEMINI_MODEL: "gemini-test",
+      GROK_API_KEY: "grok-key",
+      GROK_MEDIA_MODEL: "grok-test",
+      DEDUP_TTL_SECONDS: "604800",
+    } as unknown as Env;
+
+    for (let i = 1; i <= 5; i++) {
+      const id = `r${i}`;
+      db.rows.push(makeRow(id, `hash-${i}`));
+      await dispatchAnalyzeJob(env, {
+        request_id: id,
+        app_id: "app_a",
+        biz_type: "media_analysis",
+        created_at_ms: now,
+      });
+    }
+
+    expect(countFetches(fetchMock, "generativelanguage.googleapis.com")).toBe(15);
+    expect(countFetches(fetchMock, "api.x.ai")).toBe(5);
+    expect(await canTry(nonce as unknown as KVNamespace, "gemini", "media_analysis")).toBe(false);
+    expect(await canTry(nonce as unknown as KVNamespace, "gemini")).toBe(true);
+
+    db.rows.push(makeRow("r6", "hash-6"));
+    await dispatchAnalyzeJob(env, {
+      request_id: "r6",
+      app_id: "app_a",
+      biz_type: "media_analysis",
+      created_at_ms: now,
+    });
+    expect(countFetches(fetchMock, "generativelanguage.googleapis.com")).toBe(15);
+    expect(db.rows[5]).toMatchObject({ status: "ok", provider: "xai", model: "grok-test" });
+
+    now += 31_000;
+    geminiHealthy = true;
+    db.rows.push(makeRow("r7", "hash-7"));
+    await dispatchAnalyzeJob(env, {
+      request_id: "r7",
+      app_id: "app_a",
+      biz_type: "media_analysis",
+      created_at_ms: now,
+    });
+    expect(db.rows[6]).toMatchObject({ status: "ok", provider: "gemini", model: "gemini-test" });
+    expect(await canTry(nonce as unknown as KVNamespace, "gemini", "media_analysis")).toBe(true);
+  });
+
   it("records schema_validation_failed for malformed Gemini JSON", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { db } = await dispatchWithGeminiResponse(Response.json({
@@ -353,14 +474,14 @@ describe("media_analysis pipeline", () => {
   });
 });
 
-function makeRow(id: string): AnalyzeRow {
+function makeRow(id: string, inputHash = "same-input-hash"): AnalyzeRow {
   return {
     id,
     app_id: "app_a",
     biz_type: "media_analysis",
     biz_id: "video-1",
     user_id: null,
-    input_hash: "same-input-hash",
+    input_hash: inputHash,
     input_json: JSON.stringify({
       image_urls: ["https://cdn.example.com/1.jpg"],
       title: "Example",
@@ -386,6 +507,25 @@ function makeRow(id: string): AnalyzeRow {
   };
 }
 
+function geminiResponse(): Response {
+  return Response.json({
+    candidates: [{ content: { parts: [{ text: JSON.stringify(sampleOutput()) }] } }],
+    usageMetadata: { promptTokenCount: 33, candidatesTokenCount: 44 },
+  });
+}
+
+function xaiResponse(): Response {
+  return Response.json({
+    model: "grok-test",
+    choices: [{ message: { content: JSON.stringify(sampleOutput()) } }],
+    usage: { prompt_tokens: 55, completion_tokens: 66 },
+  });
+}
+
+function countFetches(fetchMock: ReturnType<typeof vi.fn>, needle: string): number {
+  return fetchMock.mock.calls.filter((call) => String(call[0]).includes(needle)).length;
+}
+
 async function dispatchWithGeminiResponse(response: Response): Promise<{
   db: FakeD1;
   fetchMock: ReturnType<typeof vi.fn>;
@@ -397,6 +537,7 @@ async function dispatchWithGeminiResponse(response: Response): Promise<{
 
   await dispatchAnalyzeJob({
     DB: db,
+    NONCE: new MemKV(),
     PROMPTS: new MemKV(),
     DEDUP_CACHE: new MemKV(),
     CALLBACK_QUEUE: new MemQueue<object>(),

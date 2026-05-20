@@ -30,6 +30,7 @@ declare global {
     SYNC_TIMEOUT_MS: string;
     DEDUP_TTL_SECONDS: string;
     GROK_MODEL: string;
+    GROK_MEDIA_MODEL?: string;
     GEMINI_MODEL: string;
     DEFAULT_RATE_LIMIT_QPS: string;
     LOG_LEVEL: string;

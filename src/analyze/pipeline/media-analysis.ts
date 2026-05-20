@@ -1,5 +1,5 @@
 import { AppError, ErrorCodes } from "../../lib/errors.ts";
-import type { AnalyzeRow } from "../types.ts";
+import type { AnalyzeProvider, AnalyzeRow } from "../types.ts";
 import { canonicalJson } from "../dedup.ts";
 import { loadActiveAnalyzePromptCached } from "../prompts.ts";
 import {
@@ -10,39 +10,55 @@ import {
 } from "../schema/media-analysis.ts";
 import { completeAnalyze } from "../../db/analyze-requests.ts";
 import { callGeminiMediaAnalysis } from "../providers/gemini-media.ts";
+import { callXaiMediaAnalysis } from "../providers/xai-media.ts";
+import { resolveAnalyzeRoute } from "../../providers/router.ts";
+import {
+  canTry,
+  recordAuthFailure,
+  recordFailure,
+  recordSuccess,
+} from "../../providers/circuit.ts";
+
+type MediaAnalysisProvider = Extract<AnalyzeProvider, "gemini" | "xai">;
 
 interface CachedMediaAnalysis {
   result: MediaAnalysisOutputT;
-  provider: "gemini";
+  provider: MediaAnalysisProvider;
   model: string;
   prompt_version: number;
 }
 
+interface ExecutionContext {
+  provider: MediaAnalysisProvider | null;
+  promptVersion: number | null;
+}
+
+interface MediaAnalysisRun {
+  provider: MediaAnalysisProvider;
+  model: string;
+  promptVersion: number;
+  cacheKey: string;
+  cached: boolean;
+  output: MediaAnalysisOutputT;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+}
+
 export async function executeMediaAnalysis(env: Env, row: AnalyzeRow): Promise<void> {
-  let promptVersion: number | null = null;
+  const context: ExecutionContext = { provider: null, promptVersion: null };
   try {
     const input = parseInput(row.input_json);
-    const prompt = await loadActiveAnalyzePromptCached(env, "media_analysis", "gemini");
-    if (!prompt) {
-      throw new AppError(
-        ErrorCodes.INTERNAL,
-        500,
-        "no active prompt for media_analysis/gemini",
-      );
-    }
-    promptVersion = prompt.version;
-
-    const cacheKey = mediaAnalysisDedupKey(prompt.version, row.input_hash);
-    const cached = await getCachedMediaAnalysis(env.DEDUP_CACHE, cacheKey);
-    if (cached) {
+    const run = await runMediaAnalysisRoute(env, row.input_hash, input, context);
+    if (run.cached) {
       await completeAnalyze(env.DB, {
         id: row.id,
         cached: true,
         status: "ok",
-        result_json: canonicalJson(cached.result),
-        provider: cached.provider,
-        model: cached.model,
-        prompt_version: cached.prompt_version,
+        result_json: canonicalJson(run.output),
+        provider: run.provider,
+        model: run.model,
+        prompt_version: run.promptVersion,
         input_tokens: 0,
         output_tokens: 0,
         latency_ms: 0,
@@ -51,35 +67,29 @@ export async function executeMediaAnalysis(env: Env, row: AnalyzeRow): Promise<v
       return;
     }
 
-    const providerResult = await callGeminiMediaAnalysis(env, {
-      prompt: buildMediaAnalysisPrompt(prompt.content, input),
-      input,
-      timeoutMs: 90_000,
-    });
-    const output = parseOutput(providerResult.rawText);
-    const resultJson = canonicalJson(output);
+    const resultJson = canonicalJson(run.output);
     await completeAnalyze(env.DB, {
       id: row.id,
       cached: false,
       status: "ok",
       result_json: resultJson,
-      provider: "gemini",
-      model: providerResult.model,
-      prompt_version: prompt.version,
-      input_tokens: providerResult.inputTokens,
-      output_tokens: providerResult.outputTokens,
-      latency_ms: providerResult.latencyMs,
+      provider: run.provider,
+      model: run.model,
+      prompt_version: run.promptVersion,
+      input_tokens: run.inputTokens,
+      output_tokens: run.outputTokens,
+      latency_ms: run.latencyMs,
       error_code: null,
     });
 
     const ttl = parseInt(env.DEDUP_TTL_SECONDS || "604800", 10);
     await env.DEDUP_CACHE.put(
-      cacheKey,
+      run.cacheKey,
       JSON.stringify({
-        result: output,
-        provider: "gemini",
-        model: providerResult.model,
-        prompt_version: prompt.version,
+        result: run.output,
+        provider: run.provider,
+        model: run.model,
+        prompt_version: run.promptVersion,
       } satisfies CachedMediaAnalysis),
       { expirationTtl: ttl },
     );
@@ -91,15 +101,160 @@ export async function executeMediaAnalysis(env: Env, row: AnalyzeRow): Promise<v
       cached: false,
       status: "error",
       result_json: null,
-      provider: code === ErrorCodes.INVALID_REQUEST ? null : "gemini",
+      provider: code === ErrorCodes.INVALID_REQUEST ? null : context.provider,
       model: null,
-      prompt_version: promptVersion,
+      prompt_version: context.promptVersion,
       input_tokens: 0,
       output_tokens: 0,
       latency_ms: 0,
       error_code: code,
     });
     console.warn("[media-analysis] failed", row.id, msg);
+  }
+}
+
+async function runMediaAnalysisRoute(
+  env: Env,
+  inputHash: string,
+  input: MediaAnalysisInputT,
+  context: ExecutionContext,
+): Promise<MediaAnalysisRun> {
+  const route = resolveAnalyzeRoute("media_analysis");
+  const primary = toMediaAnalysisProvider(route.primary);
+  const fallback = route.fallback ? toMediaAnalysisProvider(route.fallback) : null;
+  const primaryCanTry = await canTry(env.NONCE, primary, "media_analysis");
+
+  if (!primaryCanTry) {
+    if (fallback && await canTry(env.NONCE, fallback, "media_analysis")) {
+      console.warn(`[media-analysis] ${primary} circuit open, using fallback ${fallback}`);
+      return await tryMediaAnalysisProvider(env, fallback, inputHash, input, context);
+    }
+    throw new AppError(
+      ErrorCodes.SERVICE_UNAVAILABLE,
+      503,
+      `media_analysis providers unavailable; primary ${primary} circuit open`,
+    );
+  }
+
+  try {
+    return await tryMediaAnalysisProvider(env, primary, inputHash, input, context);
+  } catch (err) {
+    if (!fallback || !(err instanceof AppError) || !isFallbackableProviderError(err.code)) {
+      throw err;
+    }
+    if (!(await canTry(env.NONCE, fallback, "media_analysis"))) {
+      throw err;
+    }
+    console.warn(
+      `[media-analysis] primary ${primary} failed (${err.code}); falling back to ${fallback}`,
+    );
+    return await tryMediaAnalysisProvider(env, fallback, inputHash, input, context);
+  }
+}
+
+async function tryMediaAnalysisProvider(
+  env: Env,
+  provider: MediaAnalysisProvider,
+  inputHash: string,
+  input: MediaAnalysisInputT,
+  context: ExecutionContext,
+): Promise<MediaAnalysisRun> {
+  context.provider = provider;
+  const prompt = await loadActiveAnalyzePromptCached(env, "media_analysis", provider);
+  if (!prompt) {
+    throw new AppError(
+      ErrorCodes.INTERNAL,
+      500,
+      `no active prompt for media_analysis/${provider}`,
+    );
+  }
+  context.promptVersion = prompt.version;
+
+  const cacheKey = mediaAnalysisDedupKey(prompt.version, inputHash);
+  const cached = await getCachedMediaAnalysis(env.DEDUP_CACHE, cacheKey);
+  if (cached) {
+    return {
+      provider: cached.provider,
+      model: cached.model,
+      promptVersion: cached.prompt_version,
+      cacheKey,
+      cached: true,
+      output: cached.result,
+      inputTokens: 0,
+      outputTokens: 0,
+      latencyMs: 0,
+    };
+  }
+
+  try {
+    const providerResult = await callMediaAnalysisProvider(env, provider, {
+      prompt: buildMediaAnalysisPrompt(prompt.content, input),
+      input,
+      timeoutMs: 90_000,
+    });
+    const output = parseOutput(providerResult.rawText);
+    await recordSuccess(env.NONCE, provider, "media_analysis");
+    return {
+      provider,
+      model: providerResult.model,
+      promptVersion: prompt.version,
+      cacheKey,
+      cached: false,
+      output,
+      inputTokens: providerResult.inputTokens,
+      outputTokens: providerResult.outputTokens,
+      latencyMs: providerResult.latencyMs,
+    };
+  } catch (err) {
+    if (err instanceof AppError) {
+      if (err.code === ErrorCodes.PROVIDER_AUTH_FAILED) {
+        await recordAuthFailure(env.NONCE, provider, "media_analysis");
+      } else if (
+        err.code === ErrorCodes.PROVIDER_ERROR ||
+        err.code === ErrorCodes.PROVIDER_TIMEOUT
+      ) {
+        await recordFailure(env.NONCE, provider, "media_analysis");
+      }
+    }
+    throw err;
+  }
+}
+
+function isFallbackableProviderError(code: string): boolean {
+  return code === ErrorCodes.PROVIDER_ERROR ||
+    code === ErrorCodes.PROVIDER_TIMEOUT ||
+    code === ErrorCodes.PROVIDER_AUTH_FAILED;
+}
+
+function toMediaAnalysisProvider(provider: AnalyzeProvider): MediaAnalysisProvider {
+  if (provider === "gemini" || provider === "xai") return provider;
+  throw new AppError(
+    ErrorCodes.INTERNAL,
+    500,
+    `unsupported media_analysis provider '${provider}'`,
+  );
+}
+
+async function callMediaAnalysisProvider(
+  env: Env,
+  provider: MediaAnalysisProvider,
+  args: {
+    prompt: string;
+    input: MediaAnalysisInputT;
+    timeoutMs: number;
+  },
+): Promise<{
+  rawText: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+}> {
+  switch (provider) {
+    case "gemini":
+      return await callGeminiMediaAnalysis(env, args);
+    case "xai":
+      return await callXaiMediaAnalysis(env, args);
   }
 }
 
@@ -160,7 +315,7 @@ function parseInput(raw: string): MediaAnalysisInputT {
 
 function parseOutput(raw: string): MediaAnalysisOutputT {
   if (!raw) {
-    throw new AppError(ErrorCodes.SCHEMA_VALIDATION_FAILED, 500, "empty Gemini output");
+    throw new AppError(ErrorCodes.SCHEMA_VALIDATION_FAILED, 500, "empty provider output");
   }
   let text = raw.trim();
   if (text.startsWith("```")) {
@@ -173,7 +328,7 @@ function parseOutput(raw: string): MediaAnalysisOutputT {
     throw new AppError(
       ErrorCodes.SCHEMA_VALIDATION_FAILED,
       500,
-      `invalid Gemini JSON: ${e instanceof Error ? e.message : String(e)}`,
+      `invalid provider JSON: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
   const parsed = MediaAnalysisOutput.safeParse(json);
@@ -196,9 +351,10 @@ async function getCachedMediaAnalysis(
   try {
     const parsed = JSON.parse(raw) as CachedMediaAnalysis;
     const result = MediaAnalysisOutput.parse(parsed.result);
+    const provider = parsed.provider === "xai" ? "xai" : "gemini";
     return {
       result,
-      provider: "gemini",
+      provider,
       model: parsed.model,
       prompt_version: parsed.prompt_version,
     };

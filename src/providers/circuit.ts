@@ -11,6 +11,7 @@
  *  KV 最终一致性导致计数可能小有偏差，但对"整体 provider 挂了"这种场景够用。
  */
 
+import type { AnalyzeBizType, AnalyzeProvider } from "../analyze/types.ts";
 import type { Provider } from "../moderation/schema.ts";
 
 const FAIL_THRESHOLD = 5;
@@ -24,12 +25,18 @@ interface CircuitState {
   lastFailure: number; // unix ms
 }
 
-function key(provider: Provider): string {
-  return `cb:${provider}`;
+type CircuitProvider = Provider | AnalyzeProvider;
+
+function key(provider: CircuitProvider, bizType?: AnalyzeBizType): string {
+  return bizType ? `cb:${provider}:${bizType}` : `cb:${provider}`;
 }
 
-async function load(kv: KVNamespace, provider: Provider): Promise<CircuitState> {
-  const raw = await kv.get(key(provider));
+async function load(
+  kv: KVNamespace,
+  provider: CircuitProvider,
+  bizType?: AnalyzeBizType,
+): Promise<CircuitState> {
+  const raw = await kv.get(key(provider, bizType));
   if (!raw) return { failures: 0, openUntil: 0, lastFailure: 0 };
   try {
     return JSON.parse(raw) as CircuitState;
@@ -38,43 +45,64 @@ async function load(kv: KVNamespace, provider: Provider): Promise<CircuitState> 
   }
 }
 
-async function save(kv: KVNamespace, provider: Provider, s: CircuitState): Promise<void> {
+async function save(
+  kv: KVNamespace,
+  provider: CircuitProvider,
+  s: CircuitState,
+  bizType?: AnalyzeBizType,
+): Promise<void> {
   // TTL >= 60s is CF KV minimum. We keep 300s so stale state auto-clears.
-  await kv.put(key(provider), JSON.stringify(s), { expirationTtl: 300 });
+  await kv.put(key(provider, bizType), JSON.stringify(s), { expirationTtl: 300 });
 }
 
 /** Decide whether a provider can be tried now. */
-export async function canTry(kv: KVNamespace, provider: Provider): Promise<boolean> {
-  const s = await load(kv, provider);
+export async function canTry(
+  kv: KVNamespace,
+  provider: CircuitProvider,
+  bizType?: AnalyzeBizType,
+): Promise<boolean> {
+  const s = await load(kv, provider, bizType);
   if (s.openUntil === 0) return true;
   if (Date.now() >= s.openUntil) return true; // half-open — allow one try
   return false;
 }
 
-export async function recordSuccess(kv: KVNamespace, provider: Provider): Promise<void> {
-  const s = await load(kv, provider);
+export async function recordSuccess(
+  kv: KVNamespace,
+  provider: CircuitProvider,
+  bizType?: AnalyzeBizType,
+): Promise<void> {
+  const s = await load(kv, provider, bizType);
   if (s.failures !== 0 || s.openUntil !== 0) {
-    await save(kv, provider, { failures: 0, openUntil: 0, lastFailure: s.lastFailure });
+    await save(kv, provider, { failures: 0, openUntil: 0, lastFailure: s.lastFailure }, bizType);
   }
 }
 
-export async function recordFailure(kv: KVNamespace, provider: Provider): Promise<void> {
-  const s = await load(kv, provider);
+export async function recordFailure(
+  kv: KVNamespace,
+  provider: CircuitProvider,
+  bizType?: AnalyzeBizType,
+): Promise<void> {
+  const s = await load(kv, provider, bizType);
   const now = Date.now();
   // If previous failure was >60s ago, start counting fresh
   const failures = now - s.lastFailure > 60_000 ? 1 : s.failures + 1;
   const openUntil = failures >= FAIL_THRESHOLD ? now + OPEN_SECONDS * 1000 : s.openUntil;
-  await save(kv, provider, { failures, openUntil, lastFailure: now });
+  await save(kv, provider, { failures, openUntil, lastFailure: now }, bizType);
 }
 
 /** Auth 错误立即开长熔断（10 分钟），不需要攒 5 次 */
-export async function recordAuthFailure(kv: KVNamespace, provider: Provider): Promise<void> {
+export async function recordAuthFailure(
+  kv: KVNamespace,
+  provider: CircuitProvider,
+  bizType?: AnalyzeBizType,
+): Promise<void> {
   const now = Date.now();
   await save(kv, provider, {
     failures: FAIL_THRESHOLD,
     openUntil: now + AUTH_OPEN_SECONDS * 1000,
     lastFailure: now,
-  });
+  }, bizType);
 }
 
 export async function getCircuitSnapshot(kv: KVNamespace): Promise<Record<Provider, CircuitState>> {
