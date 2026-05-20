@@ -5,7 +5,7 @@
 ```
 ┌───────────────────────────┐          ┌───────────────────────┐
 │   各业务应用 (app_xxx)    │          │   管理端 Web UI       │
-│  发审核请求 + 收回调      │          │  (Cloudflare Pages)   │
+│ 审核/analyze 请求 + 回调  │          │  (Cloudflare Pages)   │
 └───────────┬───────────────┘          └───────────┬───────────┘
             │ HTTPS + HMAC                         │ Admin Token
             ▼                                      ▼
@@ -13,23 +13,27 @@
 │              Cloudflare Worker: ai-guard (主服务)             │
 │  ┌────────────┐ ┌────────────┐ ┌──────────────┐ ┌─────────┐ │
 │  │ Public API │ │ Admin API  │ │ Queue Consumer│ │ Cron    │ │
-│  │/v1/moderate│ │/admin/*    │ │ (回调 & 异步) │ │(统计汇总)│ │
+│  │/v1/moderate│ │/admin/*    │ │ moderate     │ │统计汇总 │ │
+│  │/v1/analyze │ │            │ │ analyze      │ │TTL 清理 │ │
+│  │            │ │            │ │ callback     │ │        │ │
 │  └─────┬──────┘ └─────┬──────┘ └──────┬───────┘ └────┬────┘ │
 │        └──────────┬────────┴──────────┴──────────────┘      │
 │                   ▼                                          │
-│           ┌───────────────┐   ┌─────────────┐                │
-│           │ Moderation    │──▶│ Provider     │  外部 API     │
-│           │  Pipeline     │   │  Router      │─▶ Grok        │
-│           │ (hash→dedup→  │   │ (grok/gemini│─▶ Gemini       │
-│           │  call→parse)  │   │  +熔断)      │                │
-│           └───────────────┘   └─────────────┘                │
+│  ┌────────────────┐      ┌────────────────┐                 │
+│  │ Moderation     │─────▶│ Provider Router│────▶ Grok / xAI  │
+│  │ Pipeline       │      │ + Circuit      │────▶ Gemini      │
+│  └────────────────┘      └────────────────┘                 │
+│  ┌────────────────┐      ┌────────────────┐                 │
+│  │ Analyze        │─────▶│ Prompt / Dedup │                 │
+│  │ Pipeline       │      │ shared infra   │                 │
+│  └────────────────┘      └────────────────┘                 │
 └──────────┬──────────┬───────────────┬───────────┬───────────┘
            ▼          ▼               ▼           ▼
       ┌─────────┐ ┌─────────┐  ┌───────────┐ ┌──────────┐
       │   D1    │ │   KV    │  │  Queue    │ │ Secrets  │
-      │(主数据库)│ │(去重缓存│  │(回调重试) │ │ (API Key)│
-      │         │ │ +prompt │  │           │ │          │
-      │         │ │ +app)   │  │           │ │          │
+      │moderation││ dedup   │  │MODERATION │ │ API keys │
+      │analyze  ││ prompts │  │ANALYZE    │ │HMAC keys │
+      │stats    ││ apps    │  │CALLBACK   │ │          │
       └─────────┘ └─────────┘  └───────────┘ └──────────┘
 ```
 
@@ -101,6 +105,28 @@
                  ──▶ 失败指数退避 5 次后进 DLQ
 ```
 
+### 内容服务（analyze 路径）
+
+```
+应用 POST /v1/analyze (media_analysis / media_intro)
+   ──▶ HMAC 校验 + app analyze_biz_types 校验
+   ──▶ 规整化 input object
+   ──▶ 计算 input_hash
+   ──▶ 写 analyze_requests(status=pending, input_json 长保留)
+   ──▶ enqueue ANALYZE_QUEUE
+          │
+          ▼
+       Analyze Queue Consumer:
+          ──▶ 按 biz_type 分派 pipeline
+          ──▶ KV 查 dedup cache
+          ──▶ 取 active prompt
+          ──▶ Provider Router → Gemini / xAI
+          ──▶ Zod 校验 result
+          ──▶ 写 analyze_requests.result_json / tokens / latency
+          ──▶ delivery_mode=callback|both 时 enqueue CALLBACK_QUEUE
+          ──▶ delivery_mode=pull|both 时等待消费方 GET /v1/analyze 拉取并 ack
+```
+
 ## 数据模型（D1）
 
 ```sql
@@ -111,6 +137,9 @@ CREATE TABLE apps (
   secret_hash      TEXT NOT NULL,              -- Argon2id(secret)
   callback_url     TEXT,
   biz_types        TEXT NOT NULL,              -- JSON array
+  analyze_biz_types TEXT NOT NULL DEFAULT '[]',-- analyze 系 JSON array
+  delivery_mode    TEXT NOT NULL DEFAULT 'both', -- callback|pull|both，仅 analyze
+  callback_max_concurrency INTEGER NOT NULL DEFAULT 10,
   rate_limit_qps   INTEGER NOT NULL DEFAULT 50,
   disabled         INTEGER NOT NULL DEFAULT 0,
   created_at       INTEGER NOT NULL
@@ -120,7 +149,7 @@ CREATE TABLE apps (
 CREATE TABLE prompts (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   biz_type      TEXT NOT NULL,
-  provider      TEXT NOT NULL,                  -- grok | gemini
+  provider      TEXT NOT NULL,                  -- grok | gemini | xai
   version       INTEGER NOT NULL,
   content       TEXT NOT NULL,
   is_active     INTEGER NOT NULL DEFAULT 0,
@@ -157,6 +186,36 @@ CREATE TABLE moderation_requests (
 CREATE INDEX idx_req_app_time ON moderation_requests(app_id, created_at);
 CREATE INDEX idx_req_hash     ON moderation_requests(content_hash, biz_type);
 
+-- 内容服务请求 + 结果（独立表，长保留）
+CREATE TABLE analyze_requests (
+  id               TEXT PRIMARY KEY,            -- UUIDv7
+  app_id           TEXT NOT NULL,
+  biz_type         TEXT NOT NULL,
+  biz_id           TEXT NOT NULL,
+  user_id          TEXT,
+  input_hash       TEXT NOT NULL,
+  input_json       TEXT NOT NULL,               -- 完整规整化 input，长保留
+  prompt_version   INTEGER,
+  provider         TEXT,
+  model            TEXT,
+  mode             TEXT NOT NULL,
+  cached           INTEGER NOT NULL DEFAULT 0,
+  status           TEXT NOT NULL,               -- pending|ok|error
+  result_json      TEXT,                        -- 完整 result，长保留
+  input_tokens     INTEGER,
+  output_tokens    INTEGER,
+  latency_ms       INTEGER,
+  error_code       TEXT,
+  delivery_mode    TEXT,                        -- callback|pull|both
+  delivered_at     INTEGER,
+  acked_at         INTEGER,
+  created_at       INTEGER NOT NULL,
+  completed_at     INTEGER
+);
+CREATE INDEX idx_analyze_app_time ON analyze_requests(app_id, created_at);
+CREATE INDEX idx_analyze_hash     ON analyze_requests(input_hash, biz_type);
+CREATE INDEX idx_analyze_app_pull ON analyze_requests(app_id, status, acked_at, id);
+
 -- 回调投递
 CREATE TABLE callback_deliveries (
   request_id     TEXT PRIMARY KEY,
@@ -183,6 +242,7 @@ CREATE TABLE stats_rollup (
   count_error     INTEGER NOT NULL,
   input_tokens    INTEGER NOT NULL,
   output_tokens   INTEGER NOT NULL,
+  output_bytes_total INTEGER NOT NULL DEFAULT 0,
   latency_p50_ms  INTEGER,
   latency_p95_ms  INTEGER,
   PRIMARY KEY (period, period_start, app_id, biz_type, provider)
@@ -202,6 +262,7 @@ CREATE TABLE stats_rollup (
 | Queue | Producer | Consumer | 用途 |
 |-------|---------|---------|------|
 | `MODERATION_QUEUE` | Public API（async 模式 / 降级） | 同 Worker queue handler | 异步执行审核 |
+| `ANALYZE_QUEUE` | Public API（`/v1/analyze`） | 同 Worker queue handler | 异步执行内容服务 |
 | `CALLBACK_QUEUE` | Pipeline 完成后 / 回调重试 | 同 Worker queue handler | 投递回调，指数退避 |
 
 退避策略：`1min → 5min → 30min → 2h → 12h`，5 次后进 DLQ。
@@ -222,6 +283,8 @@ comment  → grok        → gemini
 nickname → grok        → gemini
 bio      → grok        → gemini
 avatar   → gemini      → （无，Grok 没 Vision）
+media_analysis → gemini → xai
+media_intro    → xai    → gemini
 ```
 
 **每个 app 可独立设置 `provider_strategy`**：
@@ -239,7 +302,7 @@ avatar   → gemini      → （无，Grok 没 Vision）
 
 - **Worker** `ai-guard`：fetch + queue + scheduled 三入口。
 - **Pages** `ai-guard-admin`：管理 UI，鉴权走 Cloudflare Access 或 Admin Token。
-- **绑定**：`DB`（D1）、`DEDUP_CACHE` / `PROMPTS` / `APPS`（KV）、`MODERATION_QUEUE` / `CALLBACK_QUEUE`。
+- **绑定**：`DB`（D1）、`DEDUP_CACHE` / `PROMPTS` / `APPS`（KV）、`MODERATION_QUEUE` / `ANALYZE_QUEUE` / `CALLBACK_QUEUE`。
 - **Cron**：`0 * * * *` 跑小时统计；`5 0 * * *` 跑日统计与过期数据清理。
 
 ## 参考实现

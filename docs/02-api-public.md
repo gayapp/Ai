@@ -140,6 +140,144 @@ function sign(secret, body) {
 
 ---
 
+## `POST /v1/analyze` — 提交内容服务任务
+
+用于提交 analyze 系内容服务任务。当前第一批 biz_type 为 `media_analysis` 与 `media_intro`。审核业务仍使用 `/v1/moderate`，不要把 analyze biz_type 提交到 moderate 端点。
+
+### Request Body
+
+```json
+{
+  "biz_type": "media_analysis",
+  "biz_id": "video-12345",
+  "input": {
+    "image_urls": [
+      "https://cdn.example.com/video-12345/frame-001.jpg"
+    ],
+    "title": "sample title",
+    "duration_seconds": 632
+  },
+  "mode": "async",
+  "delivery_mode": "both",
+  "callback_url": "https://myapp.com/hooks/analyze",
+  "user_id": "u_88991",
+  "extra": { "anything": "会原样回传" }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `biz_type` | string | ✓ | `media_analysis` / `media_intro` |
+| `biz_id` | string | ✓ | 应用侧业务 ID，回调与 pull 结果原样带回。长度 ≤ 128 |
+| `input` | object | ✓ | 按 biz_type 各自 schema 校验。详见 [12-content-service.md](12-content-service.md) |
+| `mode` | enum | | `sync` / `async` / `auto`。`media_analysis` 强制异步；`media_intro` 默认 `auto` |
+| `delivery_mode` | enum | | `callback` / `pull` / `both`。默认沿用 app 配置，app 默认值为 `both` |
+| `callback_url` | string | | 覆盖应用默认回调地址。仅 `callback` / `both` 模式使用 |
+| `user_id` | string | | 业务侧用户 ID，用于统计或排障 |
+| `extra` | object | | ≤ 4KB，callback 与查询结果原样回传 |
+
+### `media_analysis` input
+
+```json
+{
+  "image_urls": ["https://cdn.example.com/frame-1.jpg"],
+  "title": "sample title",
+  "duration_seconds": 632,
+  "frame_metadata": [
+    {
+      "timestamp_seconds": 12.5,
+      "quality_score": 0.91,
+      "scene_id": 1
+    }
+  ],
+  "region_hint": "japan"
+}
+```
+
+`image_urls` 必须是 1..16 张 `https://` 图片 URL。`image_urls.length === 1` 表示单图分析；`image_urls.length > 1` 表示视频帧分析。两者共用 `media_analysis`，result 字段差异见 [12-content-service.md](12-content-service.md#5-media_analysis-schema)。
+
+### `media_intro` input
+
+```json
+{
+  "title": "sample title",
+  "duration_seconds": 632,
+  "tags": ["studio", "indoor"],
+  "frame_notes": [
+    { "timestamp_seconds": 12.5, "summary": "Opening scene." }
+  ],
+  "ocr_lines": ["sample text"],
+  "subtitle_text": "sample subtitle",
+  "trial_excerpt": "sample excerpt",
+  "style_hint": "concise",
+  "max_length": 240
+}
+```
+
+### 响应模式
+
+| biz_type | mode | 响应 |
+|----------|------|------|
+| `media_analysis` | 任意 | `202 + request_id`，后续 callback 或 pull |
+| `media_intro` | `auto` / `sync` 且 10s 内完成 | `200` + `result` |
+| `media_intro` | `auto` 超时或 `async` | `202 + request_id`，后续 callback 或 pull |
+| 任意 biz_type + 命中缓存 | 任意 | `200` + `result` + `cached=true` |
+
+### Response 200（同步 / 缓存命中）
+
+```json
+{
+  "request_id": "01HXYZ...",
+  "cached": true,
+  "result": {
+    "intro": "这是一段视频简介。"
+  }
+}
+```
+
+### Response 202（异步）
+
+```json
+{ "request_id": "01HXYZ...", "accepted_at": "2026-05-19T08:00:00Z" }
+```
+
+之后结果按 `delivery_mode` 交付：
+
+- `callback`：完成后投递 analyze callback，契约见 [13-callback-spec-analyze.md](13-callback-spec-analyze.md)
+- `pull`：不投递 callback，消费方通过 [14-analyze-records.md](14-analyze-records.md) 的 pull 接口拉取并 ack
+- `both`：callback 主路径，pull 作为兜底；消费方处理 callback 后仍应 ack
+
+### Response 错误
+
+| HTTP | error_code | 含义 |
+|------|------------|------|
+| 400 | `invalid_request` | 请求体不符 Zod schema |
+| 401 | `bad_signature` | HMAC 校验失败 |
+| 401 | `expired_timestamp` | 时间戳超出 ±300s |
+| 401 | `replay_nonce` | Nonce 在 5 分钟内重复 |
+| 403 | `biz_type_not_allowed` | 该 app 未启用此 analyze biz_type |
+| 404 | `app_not_found` | app_id 不存在 |
+| 422 | `unsupported_content` | 输入素材无法处理 |
+| 429 | `rate_limited` | 超过 app 配置的 QPS |
+| 500 | `provider_error` | 上游模型异常，建议重试 |
+| 502 | `provider_auth_failed` | 平台一端 AI Key 失效 |
+| 503 | `service_unavailable` | 主备 provider 均不可用 |
+| 504 | `sync_timeout` | sync 模式超时，任务已转异步 |
+
+---
+
+## Analyze pull 接口
+
+analyze 线新增三个 pull 接口：
+
+- `GET /v1/analyze/{request_id}`：单次查询
+- `GET /v1/analyze?status=ok&since_id=...`：cursor 批量拉取
+- `POST /v1/analyze/{request_id}/ack`：显式确认已消费
+
+这些接口同样使用 HMAC，GET 与 ack 均签空 body。完整参数、响应、ack 幂等规则和 IRC 推荐用法见 [14-analyze-records.md](14-analyze-records.md)。
+
+---
+
 ## 最佳实践
 
 ### 何时用 sync vs async

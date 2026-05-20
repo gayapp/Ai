@@ -1,12 +1,13 @@
 # ai-guard
 
-基于 Cloudflare Workers 的统一 AI 审核中间平台。对接 Grok（文本）与 Gemini（视觉），为公司内所有 C 端应用提供**评论 / 昵称 / 简介 / 头像** 四类 UGC 审核服务。
+基于 Cloudflare Workers 的统一 AI 中间平台。moderate 线对接 Grok（文本）与 Gemini（视觉），为公司内所有 C 端应用提供**评论 / 昵称 / 简介 / 头像** 四类 UGC 审核服务；analyze 线提供**图片 / 视频帧分析**与**视频简介生成**等内容服务。
 
 **核心特性**
 - 统一 API + 固定 JSON 回调契约，应用零感知上游是哪家模型。
 - 相同内容自动去重复用结果，省 token。
 - Prompt 可在 Admin UI 热更新；输出结构由代码层 Zod 锁死。
 - 混合自适应响应：短文本同步返回，慢请求与图片走异步回调。
+- 内容服务双轨交付：`callback` / `pull` / `both`，默认 `both`。
 - 统计（不计费）：按 app / 业务 / provider / 时间 聚合请求数、通过率、token、延迟。
 
 ## 快速链接
@@ -21,6 +22,20 @@
 | 调 prompt 的正确姿势 | [docs/05-prompts.md](docs/05-prompts.md) |
 | 看哪些统计指标 | [docs/06-stats.md](docs/06-stats.md) |
 | 线上出问题怎么办 | [docs/07-runbook.md](docs/07-runbook.md) |
+| 内容服务总览 | [docs/12-content-service.md](docs/12-content-service.md) |
+| Analyze 回调契约 | [docs/13-callback-spec-analyze.md](docs/13-callback-spec-analyze.md) |
+| Analyze pull / 调用记录 | [docs/14-analyze-records.md](docs/14-analyze-records.md) |
+
+## 支持的业务类型
+
+| track | biz_type | 说明 | 入口 |
+|-------|----------|------|------|
+| moderate | `comment` | 用户评论审核 | `POST /v1/moderate` |
+| moderate | `nickname` | 用户昵称审核 | `POST /v1/moderate` |
+| moderate | `bio` | 用户简介审核 | `POST /v1/moderate` |
+| moderate | `avatar` | 用户头像审核 | `POST /v1/moderate` |
+| analyze | `media_analysis` | 图片 / 视频帧多模态分析 | `POST /v1/analyze` |
+| analyze | `media_intro` | 视频简介生成 | `POST /v1/analyze` |
 
 ## 本地开发
 
@@ -47,6 +62,9 @@ scripts/      运维脚本（创建 app、轮换密钥等）
 ### API Worker
 - **Prod**：<https://aicenter-api.1.gay> / <https://ai-guard.schetkovvlad.workers.dev>
   - 健康检查：`/health`
+  - 审核提交：`POST /v1/moderate`
+  - 内容服务提交：`POST /v1/analyze`
+  - Analyze pull：`GET /v1/analyze/{request_id}` / `GET /v1/analyze` / `POST /v1/analyze/{request_id}/ack`
   - **系统架构图**：[`/architecture`](https://aicenter-api.1.gay/architecture)
 - **Dev**：<https://ai-guard-dev.schetkovvlad.workers.dev>
 
@@ -59,8 +77,8 @@ scripts/      运维脚本（创建 app、轮换密钥等）
 
 ### 优化路线图
 
-平台定位：**成人男同社交 APP 的审核中间层**。合法 NSFW 内容应放行，
-仅对 CSAM / 广告引流 / 毒品 / 赌博 / 政治敏感零容忍。
+平台 moderate 线定位：**成人男同社交 APP 的审核中间层**。合法 NSFW 内容应放行，
+仅对 CSAM / 广告引流 / 毒品 / 赌博 / 政治敏感零容忍。analyze 线作为内容服务中转，与 moderate 线并行演进，不改变既有审核契约。
 
 详细任务清单（按优先级）：[docs/optimization/README.md](docs/optimization/README.md)
 
