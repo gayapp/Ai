@@ -8,6 +8,7 @@ import {
   publishPrompt,
   rollbackPrompt,
 } from "../db/queries.ts";
+import { ANALYZE_BIZ_TYPES } from "../analyze/schema/envelope.ts";
 import { BizType, ModelOutput, Provider } from "../moderation/schema.ts";
 import { getAdapter } from "../providers/router.ts";
 
@@ -18,9 +19,16 @@ adminPromptsRouter.use("*", async (c, next) => {
   await next();
 });
 
+const MODERATE_BIZ_TYPES = ["comment", "nickname", "bio", "avatar"] as const;
+const PROMPT_BIZ_TYPES = [...MODERATE_BIZ_TYPES, ...ANALYZE_BIZ_TYPES] as const;
+const PROMPT_PROVIDERS = ["grok", "gemini", "xai"] as const;
+const PromptBizType = z.enum(PROMPT_BIZ_TYPES);
+const PromptProvider = z.enum(PROMPT_PROVIDERS);
+
 adminPromptsRouter.get("/", async (c) => {
-  const biz_type = BizType.parse(c.req.query("biz_type"));
-  const provider = Provider.parse(c.req.query("provider"));
+  const biz_type = PromptBizType.parse(c.req.query("biz_type"));
+  const provider = PromptProvider.parse(c.req.query("provider"));
+  assertPromptRoute(biz_type, provider);
   const rows = await listPromptsFor(c.env.DB, biz_type, provider);
   return c.json({
     items: rows.map((r) => ({
@@ -37,14 +45,15 @@ adminPromptsRouter.get("/", async (c) => {
 });
 
 const PublishSchema = z.object({
-  biz_type: BizType,
-  provider: Provider,
+  biz_type: PromptBizType,
+  provider: PromptProvider,
   content: z.string().min(1).max(20_000),
   created_by: z.string().optional(),
 });
 
 adminPromptsRouter.post("/", async (c) => {
   const body = PublishSchema.parse(await c.req.json());
+  assertPromptRoute(body.biz_type, body.provider);
   const row = await publishPrompt(
     c.env.DB,
     body.biz_type,
@@ -69,7 +78,8 @@ adminPromptsRouter.post("/:id/rollback", async (c) => {
   }
   const row = await rollbackPrompt(c.env.DB, id);
   if (!row) throw new AppError(ErrorCodes.NOT_FOUND, 404, "prompt not found");
-  await invalidatePromptCache(c.env, row.biz_type as "comment" | "nickname" | "bio" | "avatar", row.provider as "grok" | "gemini");
+  assertPromptRoute(row.biz_type, row.provider);
+  await invalidatePromptCache(c.env, row.biz_type, row.provider);
   return c.json({
     id: row.id,
     biz_type: row.biz_type,
@@ -78,6 +88,21 @@ adminPromptsRouter.post("/:id/rollback", async (c) => {
     is_active: !!row.is_active,
   });
 });
+
+function assertPromptRoute(bizType: string, provider: string): void {
+  const moderate = (MODERATE_BIZ_TYPES as readonly string[]).includes(bizType);
+  const analyze = (ANALYZE_BIZ_TYPES as readonly string[]).includes(bizType);
+  const ok = moderate
+    ? provider === "grok" || provider === "gemini"
+    : analyze && (provider === "xai" || provider === "gemini");
+  if (!ok) {
+    throw new AppError(
+      ErrorCodes.INVALID_REQUEST,
+      400,
+      `provider '${provider}' is not valid for biz_type '${bizType}'`,
+    );
+  }
+}
 
 const DryRunSchema = z.object({
   biz_type: BizType,

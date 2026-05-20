@@ -70,9 +70,11 @@ export async function api<T = unknown>(
 // =============================================================
 
 export type BizType = "comment" | "nickname" | "bio" | "avatar";
-export type Provider = "grok" | "gemini";
+export type AnalyzeBizType = "media_analysis" | "media_intro";
+export type Provider = "grok" | "gemini" | "xai";
 export type Status = "pass" | "reject" | "review" | "error" | "pending";
 export type RiskLevel = "safe" | "low" | "medium" | "high";
+export type DeliveryMode = "callback" | "pull" | "both";
 
 export type ProviderStrategy = "auto" | "grok" | "gemini" | "round_robin";
 
@@ -81,6 +83,9 @@ export interface AppConfig {
   name: string;
   callback_url: string | null;
   biz_types: string[];
+  analyze_biz_types: string[];
+  delivery_mode: DeliveryMode;
+  callback_max_concurrency: number;
   rate_limit_qps: number;
   disabled: boolean;
   provider_strategy: ProviderStrategy;
@@ -170,6 +175,48 @@ export interface SummaryData {
   funnel?: Record<string, number>; // { model: N, low_signal: M, "ad:xxx": K }
 }
 
+export interface AnalyzeSummaryData {
+  from: string;
+  to: string;
+  total: number;
+  cached: number;
+  cache_hit_rate: number;
+  by_status: { pending: number; ok: number; error: number };
+  ok_rate: number;
+  tokens: { input: number; output: number };
+  output_bytes_total: number;
+}
+
+export interface AnalyzeRecordRow {
+  request_id: string;
+  app_id: string;
+  biz_type: string;
+  biz_id: string;
+  user_id: string | null;
+  mode: string;
+  status: "pending" | "ok" | "error";
+  provider: Provider | null;
+  model: string | null;
+  cached: boolean;
+  tokens: { input: number; output: number };
+  latency_ms: number;
+  error_code: string | null;
+  delivery_mode: DeliveryMode;
+  delivered_at: string | null;
+  acked_at: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface AnalyzeRecordDetail extends AnalyzeRecordRow {
+  input_hash: string;
+  prompt_version: number | null;
+  callback_url: string | null;
+  input: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
+  extra: Record<string, unknown> | null;
+}
+
 export interface CallbackRow {
   request_id: string;
   url: string;
@@ -188,6 +235,9 @@ export const Apps = {
     name: string;
     callback_url?: string;
     biz_types: string[];
+    analyze_biz_types?: string[];
+    delivery_mode?: DeliveryMode;
+    callback_max_concurrency?: number;
     rate_limit_qps?: number;
     provider_strategy?: ProviderStrategy;
   }) =>
@@ -199,6 +249,9 @@ export const Apps = {
     name: string;
     callback_url: string | null;
     biz_types: string[];
+    analyze_biz_types: string[];
+    delivery_mode: DeliveryMode;
+    callback_max_concurrency: number;
     rate_limit_qps: number;
     disabled: boolean;
     provider_strategy: ProviderStrategy;
@@ -225,6 +278,8 @@ export const Prompts = {
 export const Stats = {
   summary: (q: { from?: string; to?: string; app_id?: string } = {}) =>
     api<SummaryData>(`/admin/stats/summary${qs(q)}`),
+  analyzeSummary: (q: { from?: string; to?: string; app_id?: string } = {}) =>
+    api<AnalyzeSummaryData>(`/admin/stats/analyze-summary${qs(q)}`),
   requests: (q: {
     app_id?: string;
     biz_type?: string;
@@ -240,6 +295,25 @@ export const Stats = {
     api<{ items: CallbackRow[] }>(`/admin/stats/callbacks${qs(q)}`),
   topUsers: (q: { app_id: string; limit?: number; from?: string; to?: string }) =>
     api<{ items: Array<{ user_id: string; rejects: number }> }>(`/admin/stats/top-users${qs(q)}`),
+};
+
+export const AnalyzeRecords = {
+  list: (q: {
+    app_id?: string;
+    biz_type?: string;
+    biz_id?: string;
+    status?: string;
+    delivery_mode?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    cursor?: string;
+  } = {}) => api<{ items: AnalyzeRecordRow[]; next_cursor: string | null }>(
+    `/admin/analyze-records${qs(q)}`,
+  ),
+  get: (id: string) => api<AnalyzeRecordDetail>(
+    `/admin/analyze-records/${encodeURIComponent(id)}`,
+  ),
 };
 
 export const Alerts = {

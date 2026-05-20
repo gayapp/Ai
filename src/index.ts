@@ -7,6 +7,7 @@ import { moderateRouter } from "./routes/moderate.ts";
 import { analyzeRouter } from "./routes/analyze.ts";
 import { analyzeRecordsRouter } from "./routes/analyze-records.ts";
 import { adminAppsRouter } from "./routes/admin-apps.ts";
+import { adminAnalyzeRecordsRouter } from "./routes/admin-analyze-records.ts";
 import { adminPromptsRouter } from "./routes/admin-prompts.ts";
 import { adminStatsRouter } from "./routes/admin-stats.ts";
 import { executeModeration } from "./moderation/pipeline.ts";
@@ -80,6 +81,7 @@ app.route("/", moderateRouter);
 app.route("/", analyzeRouter);
 app.route("/", analyzeRecordsRouter);
 app.route("/admin/apps", adminAppsRouter);
+app.route("/admin/analyze-records", adminAnalyzeRecordsRouter);
 app.route("/admin/prompts", adminPromptsRouter);
 app.route("/admin/stats", adminStatsRouter);
 

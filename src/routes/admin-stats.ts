@@ -8,6 +8,7 @@ import {
   summarize,
   topUsers,
 } from "../db/queries.ts";
+import { summarizeAnalyzeRequests } from "../db/admin-analyze-queries.ts";
 import { BizType, Status } from "../moderation/schema.ts";
 import { executeModeration } from "../moderation/pipeline.ts";
 import { readEvidence } from "../evidence/r2.ts";
@@ -68,6 +69,30 @@ adminStatsRouter.get("/summary", async (c) => {
       output: row.output_tokens,
     },
     funnel, // { model: N, low_signal: M, "ad:wechat_v_signal": K, ... }
+  });
+});
+
+adminStatsRouter.get("/analyze-summary", async (c) => {
+  const { from_ms, to_ms } = resolveRange(c);
+  const app_id = c.req.query("app_id") ?? undefined;
+  const row = await summarizeAnalyzeRequests(c.env.DB, { app_id, from_ms, to_ms });
+  return c.json({
+    from: new Date(from_ms).toISOString(),
+    to: new Date(to_ms).toISOString(),
+    total: row.count_total,
+    cached: row.count_cached,
+    cache_hit_rate: row.count_total ? +(row.count_cached / row.count_total).toFixed(4) : 0,
+    by_status: {
+      pending: row.count_pending,
+      ok: row.count_ok,
+      error: row.count_error,
+    },
+    ok_rate: row.count_total > 0 ? +(row.count_ok / row.count_total).toFixed(4) : 0,
+    tokens: {
+      input: row.input_tokens,
+      output: row.output_tokens,
+    },
+    output_bytes_total: row.output_bytes_total,
   });
 });
 

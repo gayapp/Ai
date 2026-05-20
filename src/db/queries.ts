@@ -171,8 +171,8 @@ export async function getActivePrompt(
 
 export async function listPromptsFor(
   db: D1Database,
-  bizType: BizType,
-  provider: Provider,
+  bizType: string,
+  provider: string,
 ): Promise<PromptRow[]> {
   const { results } = await db
     .prepare(
@@ -190,8 +190,8 @@ export async function getPromptById(db: D1Database, id: number): Promise<PromptR
 
 export async function publishPrompt(
   db: D1Database,
-  bizType: BizType,
-  provider: Provider,
+  bizType: string,
+  provider: string,
   content: string,
   createdBy: string,
 ): Promise<PromptRow> {
@@ -613,8 +613,8 @@ export async function invalidateAllPromptCache(env: Env): Promise<void> {
 
 export async function invalidatePromptCache(
   env: Env,
-  bizType: BizType,
-  provider: Provider,
+  bizType: string,
+  provider: string,
 ): Promise<void> {
   await env.PROMPTS.delete(`${bizType}:${provider}:active`);
 }

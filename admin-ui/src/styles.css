@@ -108,6 +108,7 @@ pre { font-family: var(--mono); background: var(--panel-2); padding: 12px 14px;
 .pill.review { background: rgba(210,153,34,0.18); color: var(--warn); }
 .pill.error  { background: rgba(255,107,107,0.2); color: var(--crit); }
 .pill.pending{ background: rgba(139,148,158,0.18); color: var(--muted); }
+.pill.ok     { background: rgba(63,185,80,0.18); color: var(--good); }
 .pill.safe   { background: rgba(63,185,80,0.18); color: var(--good); }
 .pill.low    { background: rgba(88,166,255,0.18); color: var(--accent); }
 .pill.medium { background: rgba(210,153,34,0.18); color: var(--warn); }
@@ -115,6 +116,7 @@ pre { font-family: var(--mono); background: var(--panel-2); padding: 12px 14px;
 .pill.cached { background: rgba(88,166,255,0.18); color: var(--accent); }
 .pill.grok   { background: rgba(180,120,250,0.18); color: #bc8cff; }
 .pill.gemini { background: rgba(88,166,255,0.18); color: var(--accent); }
+.pill.xai    { background: rgba(180,120,250,0.18); color: #bc8cff; }
 
 /* Form */
 input, select, textarea {

@@ -27,7 +27,7 @@ export async function rollup(
       ? Math.floor(from_ms / 3_600_000) * 3_600_000
       : Math.floor(from_ms / 86_400_000) * 86_400_000;
 
-  const { results } = await db
+  const { results: moderation } = await db
     .prepare(
       `SELECT
          app_id,
@@ -42,7 +42,8 @@ export async function rollup(
          COALESCE(SUM(input_tokens), 0) AS input_tokens,
          COALESCE(SUM(output_tokens), 0) AS output_tokens,
          CAST(COALESCE(AVG(latency_ms), 0) AS INTEGER) AS latency_p50_ms,
-         CAST(COALESCE(MAX(latency_ms), 0) AS INTEGER) AS latency_p95_ms
+         CAST(COALESCE(MAX(latency_ms), 0) AS INTEGER) AS latency_p95_ms,
+         0 AS output_bytes_total
        FROM moderation_requests
        WHERE created_at >= ? AND created_at < ?
        GROUP BY app_id, biz_type, provider`,
@@ -62,17 +63,58 @@ export async function rollup(
       output_tokens: number;
       latency_p50_ms: number;
       latency_p95_ms: number;
+      output_bytes_total: number;
+    }>();
+
+  const { results: analyze } = await db
+    .prepare(
+      `SELECT
+         app_id,
+         biz_type,
+         COALESCE(provider, 'unknown') AS provider,
+         COUNT(*) AS count_total,
+         SUM(CASE WHEN cached = 1 THEN 1 ELSE 0 END) AS count_cached,
+         SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS count_pass,
+         0 AS count_reject,
+         0 AS count_review,
+         SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS count_error,
+         COALESCE(SUM(input_tokens), 0) AS input_tokens,
+         COALESCE(SUM(output_tokens), 0) AS output_tokens,
+         CAST(COALESCE(AVG(latency_ms), 0) AS INTEGER) AS latency_p50_ms,
+         CAST(COALESCE(MAX(latency_ms), 0) AS INTEGER) AS latency_p95_ms,
+         COALESCE(SUM(LENGTH(COALESCE(result_json, ''))), 0) AS output_bytes_total
+       FROM analyze_requests
+       WHERE created_at >= ? AND created_at < ?
+       GROUP BY app_id, biz_type, provider`,
+    )
+    .bind(from_ms, to_ms)
+    .all<{
+      app_id: string;
+      biz_type: string;
+      provider: string;
+      count_total: number;
+      count_cached: number;
+      count_pass: number;
+      count_reject: number;
+      count_review: number;
+      count_error: number;
+      input_tokens: number;
+      output_tokens: number;
+      latency_p50_ms: number;
+      latency_p95_ms: number;
+      output_bytes_total: number;
     }>();
 
   let written = 0;
+  const results = [...moderation, ...analyze];
   for (const r of results) {
     await db
       .prepare(
         `INSERT INTO stats_rollup
            (period, period_start, app_id, biz_type, provider,
             count_total, count_cached, count_pass, count_reject, count_review, count_error,
-            input_tokens, output_tokens, latency_p50_ms, latency_p95_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            input_tokens, output_tokens, latency_p50_ms, latency_p95_ms, output_bytes_total)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(period, period_start, app_id, biz_type, provider) DO UPDATE SET
            count_total   = excluded.count_total,
            count_cached  = excluded.count_cached,
@@ -83,12 +125,13 @@ export async function rollup(
            input_tokens  = excluded.input_tokens,
            output_tokens = excluded.output_tokens,
            latency_p50_ms = excluded.latency_p50_ms,
-           latency_p95_ms = excluded.latency_p95_ms`,
+           latency_p95_ms = excluded.latency_p95_ms,
+           output_bytes_total = excluded.output_bytes_total`,
       )
       .bind(
         period, bucket, r.app_id, r.biz_type, r.provider,
         r.count_total, r.count_cached, r.count_pass, r.count_reject, r.count_review, r.count_error,
-        r.input_tokens, r.output_tokens, r.latency_p50_ms, r.latency_p95_ms,
+        r.input_tokens, r.output_tokens, r.latency_p50_ms, r.latency_p95_ms, r.output_bytes_total,
       )
       .run();
     written++;
