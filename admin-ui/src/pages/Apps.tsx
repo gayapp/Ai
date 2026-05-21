@@ -11,6 +11,15 @@ const ANALYZE_BIZ = ["media_analysis", "media_intro"];
 const DELIVERY: DeliveryMode[] = ["callback", "pull", "both"];
 const STRATEGIES: ProviderStrategy[] = ["auto", "grok", "gemini", "round_robin"];
 
+const BIZ_LABELS: Record<string, string> = {
+  comment: "comment moderation",
+  nickname: "nickname moderation",
+  bio: "profile bio moderation",
+  avatar: "avatar moderation",
+  media_analysis: "IRC image/video frame analysis",
+  media_intro: "IRC intro generation",
+};
+
 const STRATEGY_PILL_COLOR: Record<ProviderStrategy, string> = {
   auto: "",
   grok: "grok",
@@ -145,6 +154,22 @@ function AppDialog({ app, onClose, onCreated, onSaved }: {
     } finally { setBusy(false); }
   }
 
+  function applyModeratePreset() {
+    setModerateBiz(new Set(["comment", "nickname", "bio", "avatar"]));
+    setAnalyzeBiz(new Set());
+    setDelivery("callback");
+  }
+
+  function applyIrcAnalyzePreset() {
+    setName((current) => current || "IRC");
+    setModerateBiz(new Set());
+    setAnalyzeBiz(new Set(ANALYZE_BIZ));
+    setDelivery("both");
+    setCallbackMax(10);
+    setQps(500);
+    setStrategy("auto");
+  }
+
   const hasAnyBiz = moderateBiz.size + analyzeBiz.size > 0;
   return (
     <div className="dialog-backdrop" onClick={onClose}>
@@ -159,6 +184,16 @@ function AppDialog({ app, onClose, onCreated, onSaved }: {
           <div className="form-row">
             <label>Default callback URL</label>
             <input type="url" value={cb} onChange={(e) => setCb(e.target.value)} placeholder="https://your-app.example/hook" />
+          </div>
+          <div className="form-row">
+            <label>Presets</label>
+            <div>
+              <button className="btn small secondary" type="button" onClick={applyIrcAnalyzePreset}>IRC analyze</button>{" "}
+              <button className="btn small secondary" type="button" onClick={applyModeratePreset}>moderate default</button>
+              <div className="muted" style={{ marginTop: 6 }}>
+                IRC analyze selects media_analysis + media_intro and uses delivery_mode=both.
+              </div>
+            </div>
           </div>
           <CheckboxGroup title="moderate biz_types" values={MODERATE_BIZ} selected={moderateBiz} onChange={setModerateBiz} />
           <CheckboxGroup title="analyze biz_types" values={ANALYZE_BIZ} selected={analyzeBiz} onChange={setAnalyzeBiz} />
@@ -206,13 +241,15 @@ function CheckboxGroup({ title, values, selected, onChange }: {
       <label>{title}</label>
       <div>
         {values.map((b) => (
-          <label key={b} style={{ display: "inline-flex", gap: 4, marginRight: 16, textTransform: "none" }}>
+          <label key={b} style={{ display: "inline-flex", gap: 6, marginRight: 16, textTransform: "none", alignItems: "baseline" }}>
             <input type="checkbox" checked={selected.has(b)} style={{ width: "auto" }}
               onChange={(e) => {
                 const n = new Set(selected);
                 e.target.checked ? n.add(b) : n.delete(b);
                 onChange(n);
-              }} /> {b}
+              }} />
+            <code>{b}</code>
+            <span className="muted">{BIZ_LABELS[b] ?? ""}</span>
           </label>
         ))}
       </div>
