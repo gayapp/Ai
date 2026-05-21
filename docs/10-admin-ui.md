@@ -113,7 +113,23 @@
 - analyze providers：`xai` / `gemini`
 - 发布新版本后立即 active。
 - 回滚会切回历史版本。
-- moderate 支持 dry-run；analyze dry-run 列入下一轮规划。
+- Dry run：
+  - moderate：一行一个文本或图片 URL 样本，真实请求 provider 并校验输出 schema。
+  - `media_intro`：一行一个 JSON input object，真实请求 xAI / Gemini text provider 并校验 `MediaIntroOutput`。
+  - `media_analysis`：一行一个 JSON input object，只做 input schema 校验和 prompt preview，不请求多模态 provider。
+
+## App Onboarding
+
+路径：`/apps`
+
+创建 app 或轮换 secret 后，弹窗会提供：
+
+- 一次性 app secret。
+- `AI_GUARD_*` env 配置片段。
+- `/v1/analyze` submit / pull / ack 入口。
+- HMAC 签名格式。
+
+`Copy IRC env` 会复制完整 env 片段，适合 IRC 新建独立 app 后直接交接到安全配置。
 
 ## 告警
 

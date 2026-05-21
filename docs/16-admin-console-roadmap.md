@@ -105,14 +105,15 @@ detail 中重点字段：
 - provider health 手动检查入口。
 - Provider 状态页：模型配置、secret 配置状态、global/analyze KV 熔断状态。
 - Analyze backlog 统计：pending / pull_unacked / callback_undelivered 年龄桶。
+- App onboarding：创建或轮换 secret 后显示 IRC env、pull/ack 入口和 HMAC 签名格式。
+- Analyze prompt dry-run：`media_intro` provider 干跑；`media_analysis` input schema + prompt preview。
 
 ### P1 建议下一轮
 
 | 项 | 价值 | 验收 |
 | --- | --- | --- |
-| App onboarding 向导 | 降低接入方创建 app 时选错字段概率 | 创建后给出 app_id、HMAC 签名示例、回调/pull 建议 |
-| Analyze prompt dry-run | 当前 dry-run 只对 moderate 开启 | 支持 `media_intro` 文本样本 dry-run；`media_analysis` 先只做 schema 样例校验 |
 | 审计日志 | 记录 app secret rotation、prompt publish、disable app 等管理动作 | D1 新表 + Admin UI 列表 |
+| Analyze prompt regression set | Prompt 发布前批量跑固定样本集 | 支持保存样本集、对比 active vs draft |
 
 ### P2 后续增强
 

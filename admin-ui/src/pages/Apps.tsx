@@ -259,10 +259,25 @@ function CheckboxGroup({ title, values, selected, onChange }: {
 
 function SecretDialog({ title, data, onClose }: { title: string; data: { id: string; secret: string }; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [copiedConfig, setCopiedConfig] = useState(false);
+  const envSnippet = [
+    "AI_BACKEND=ai_guard",
+    "AI_GUARD_BASE_URL=https://aicenter-api.1.gay",
+    `AI_GUARD_APP_ID=${data.id}`,
+    `AI_GUARD_APP_SECRET=${data.secret}`,
+    "AI_GUARD_DELIVERY_MODE=both",
+    "AI_GUARD_TIMEOUT_SECONDS=180",
+    "AI_GUARD_POLL_INTERVAL_SECONDS=5",
+  ].join("\n");
   async function copy() {
     await navigator.clipboard.writeText(data.secret);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+  async function copyConfig() {
+    await navigator.clipboard.writeText(envSnippet);
+    setCopiedConfig(true);
+    setTimeout(() => setCopiedConfig(false), 2000);
   }
   return (
     <div className="dialog-backdrop" onClick={onClose}>
@@ -276,7 +291,17 @@ function SecretDialog({ title, data, onClose }: { title: string; data: { id: str
         </div>
         <div className="mt16">
           <button className="btn" onClick={copy}>{copied ? "Copied" : "Copy secret"}</button>{" "}
+          <button className="btn secondary" onClick={copyConfig}>{copiedConfig ? "Copied config" : "Copy IRC env"}</button>{" "}
           <button className="btn secondary" onClick={onClose}>Close</button>
+        </div>
+        <h3 style={{ marginTop: 22 }}>Integration quick start</h3>
+        <pre>{envSnippet}</pre>
+        <div className="kv-grid">
+          <span className="k">submit</span><code className="v">POST /v1/analyze</code>
+          <span className="k">pull one</span><code className="v">GET /v1/analyze/{"{request_id}"}</code>
+          <span className="k">pull list</span><code className="v">GET /v1/analyze?status=ok&amp;include=unacked</code>
+          <span className="k">ack</span><code className="v">POST /v1/analyze/{"{request_id}"}/ack</code>
+          <span className="k">signature</span><code className="v wrap">HMAC_SHA256(secret, timestamp + "\n" + nonce + "\n" + sha256(body))</code>
         </div>
       </div>
     </div>

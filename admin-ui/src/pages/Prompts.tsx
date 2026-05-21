@@ -67,11 +67,9 @@ export default function PromptsPage() {
         </div>
         <div className="grow"></div>
         <button className="btn" onClick={() => setShowNew(true)}>Publish version</button>
-        {track === "moderate" && (
-          <button className="btn secondary" onClick={() => setDryRun(active?.content ?? "")}>
-            Dry run
-          </button>
-        )}
+        <button className="btn secondary" onClick={() => setDryRun(active?.content ?? "")}>
+          Dry run
+        </button>
       </div>
 
       {active && (
@@ -177,7 +175,7 @@ function DryRunDialog({ biz, prov, content, onClose }: {
   onClose: () => void;
 }) {
   const [prompt, setPrompt] = useState(content);
-  const [samples, setSamples] = useState("sample 1\nsample 2");
+  const [samples, setSamples] = useState(defaultDryRunSamples(biz));
   const [results, setResults] = useState<any[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -208,6 +206,11 @@ function DryRunDialog({ biz, prov, content, onClose }: {
           <div className="form-row">
             <label>Samples</label>
             <textarea value={samples} onChange={(e) => setSamples(e.target.value)} style={{ minHeight: 120 }} />
+            <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+              {isAnalyzeBiz(biz)
+                ? "Analyze dry-run expects one compact JSON input object per line."
+                : "Moderate dry-run expects one text or image URL sample per line."}
+            </div>
           </div>
           {err && <div className="error">{err}</div>}
           <div className="mt8">
@@ -229,12 +232,41 @@ function DryRunDialog({ biz, prov, content, onClose }: {
                     </>
                   ) : (
                     <>
+                      {r.dry_run_mode && (
+                        <>
+                          <span className="k">mode</span>
+                          <span className="v"><code>{r.dry_run_mode}</code></span>
+                        </>
+                      )}
                       <span className="k">schema_ok</span>
-                      <span className="v">{r.schema_ok ? "yes" : <span className="error">no</span>}</span>
-                      <span className="k">parsed</span>
-                      <pre className="v" style={{ margin: 0 }}>{JSON.stringify(r.parsed, null, 2)}</pre>
-                      <span className="k">tokens</span>
-                      <span className="v">in={r.tokens?.input ?? 0} out={r.tokens?.output ?? 0} · {r.latency_ms ?? 0}ms</span>
+                      <span className="v">
+                        {r.schema_ok ?? r.input_schema_ok ? "yes" : <span className="error">no</span>}
+                        {r.schema_error && <span className="muted"> {r.schema_error}</span>}
+                      </span>
+                      {r.parsed && (
+                        <>
+                          <span className="k">parsed</span>
+                          <pre className="v" style={{ margin: 0 }}>{JSON.stringify(r.parsed, null, 2)}</pre>
+                        </>
+                      )}
+                      {r.prompt_preview && (
+                        <>
+                          <span className="k">prompt_preview</span>
+                          <pre className="v" style={{ margin: 0 }}>{r.prompt_preview}</pre>
+                        </>
+                      )}
+                      {r.note && (
+                        <>
+                          <span className="k">note</span>
+                          <span className="v wrap">{r.note}</span>
+                        </>
+                      )}
+                      {(r.tokens || r.latency_ms !== undefined) && (
+                        <>
+                          <span className="k">tokens</span>
+                          <span className="v">in={r.tokens?.input ?? 0} out={r.tokens?.output ?? 0} · {r.latency_ms ?? 0}ms</span>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
@@ -245,4 +277,36 @@ function DryRunDialog({ biz, prov, content, onClose }: {
       </div>
     </div>
   );
+}
+
+function isAnalyzeBiz(biz: string): boolean {
+  return biz === "media_analysis" || biz === "media_intro";
+}
+
+function defaultDryRunSamples(biz: string): string {
+  if (biz === "media_intro") {
+    return JSON.stringify({
+      title: "Sample clip",
+      duration_seconds: 120,
+      tags: ["travel", "night"],
+      frame_notes: [
+        { timestamp_seconds: 12, summary: "Opening city shot" },
+        { timestamp_seconds: 74, summary: "Main action sequence" },
+      ],
+      style_hint: "concise",
+      max_length: 160,
+    });
+  }
+  if (biz === "media_analysis") {
+    return JSON.stringify({
+      image_urls: ["https://example.com/frame.jpg"],
+      title: "Sample media",
+      duration_seconds: 120,
+      frame_metadata: [
+        { timestamp_seconds: 0, quality_score: 0.9 },
+      ],
+      region_hint: "japan",
+    });
+  }
+  return "sample 1\nsample 2";
 }

@@ -136,6 +136,31 @@ Authorization: Bearer <ADMIN_TOKEN>
 ### `POST /admin/prompts/{id}/test` — 干跑
 在不改数据库的情况下用给定 prompt 跑一段测试文本，返回模型原始输出 + Zod 校验结果。用于 [.claude/skills/tune-prompt/](../.claude/skills/tune-prompt/SKILL.md) 工作流。
 
+### `POST /admin/prompts/dry-run` — prompt 干跑
+
+**Request**
+
+```json
+{
+  "biz_type": "media_intro",
+  "provider": "xai",
+  "content": "完整 prompt 文本",
+  "samples": [
+    "{\"title\":\"Sample clip\",\"duration_seconds\":120,\"style_hint\":\"concise\"}"
+  ]
+}
+```
+
+支持范围：
+
+| biz_type | provider | 行为 |
+| --- | --- | --- |
+| `comment` / `nickname` / `bio` / `avatar` | `grok` / `gemini` | 真实请求 moderate provider，校验 moderate 输出 schema |
+| `media_intro` | `xai` / `gemini` | 真实请求 text provider，校验 `MediaIntroOutput` |
+| `media_analysis` | `xai` / `gemini` | 只校验 `MediaAnalysisInput` 并返回 prompt preview；不下载图片、不请求多模态 provider |
+
+`media_intro` / `media_analysis` 的 `samples` 需要是一行一个 JSON input object。
+
 ---
 
 ## Stats（统计）
