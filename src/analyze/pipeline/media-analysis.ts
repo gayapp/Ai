@@ -5,6 +5,7 @@ import { loadActiveAnalyzePromptCached } from "../prompts.ts";
 import {
   MediaAnalysisInput,
   MediaAnalysisOutput,
+  REGION_CODES,
   type MediaAnalysisInputT,
   type MediaAnalysisOutputT,
 } from "../schema/media-analysis.ts";
@@ -332,11 +333,126 @@ function parseOutput(raw: string): MediaAnalysisOutputT {
       `invalid provider JSON: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
-  const parsed = MediaAnalysisOutput.safeParse(json);
+  const parsed = MediaAnalysisOutput.safeParse(normalizeMediaAnalysisOutput(json));
   if (!parsed.success) {
     throw new AppError(ErrorCodes.SCHEMA_VALIDATION_FAILED, 500, parsed.error.message);
   }
   return parsed.data;
+}
+
+const MEDIA_ANALYSIS_KEYS = [
+  "moderation",
+  "tags",
+  "ad_detection",
+  "face_coordinates",
+  "region",
+  "description",
+  "score",
+  "scoring_breakdown",
+  "cover_candidates",
+  "trial",
+  "frame_notes",
+];
+
+function normalizeMediaAnalysisOutput(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  if (!MEDIA_ANALYSIS_KEYS.some((key) => key in value)) return value;
+  const out: Record<string, unknown> = { ...value };
+  out.moderation = normalizeModeration(out.moderation);
+  out.tags = normalizeTags(out.tags);
+  out.ad_detection = normalizeAdDetection(out.ad_detection);
+  out.face_coordinates = Array.isArray(out.face_coordinates) ? out.face_coordinates : [];
+  out.region = normalizeRegion(out.region);
+  return out;
+}
+
+function normalizeModeration(value: unknown): Record<string, unknown> {
+  const src = isRecord(value) ? value : {};
+  const decision = src.decision === "approve" || src.decision === "reject" || src.decision === "review"
+    ? src.decision
+    : "review";
+  return {
+    decision,
+    confidence: numberInRange(src.confidence, 0, 0, 1),
+    summary: stringOr(src.summary, "Provider output omitted moderation details; defaulted to review."),
+    violations: Array.isArray(src.violations) ? src.violations.map(normalizeViolation) : [],
+  };
+}
+
+function normalizeViolation(value: unknown): Record<string, unknown> {
+  const src = isRecord(value) ? value : {};
+  return {
+    category: stringOr(src.category, "unknown"),
+    detected: typeof src.detected === "boolean" ? src.detected : true,
+    confidence: numberInRange(src.confidence, 0, 0, 1),
+    evidence: stringOr(src.evidence, ""),
+    ...(typeof src.frame_index === "number" ? { frame_index: src.frame_index } : {}),
+    ...(typeof src.timestamp_seconds === "number" ? { timestamp_seconds: src.timestamp_seconds } : {}),
+  };
+}
+
+function normalizeTags(value: unknown): Record<string, unknown> {
+  const src = isRecord(value) ? value : {};
+  const categories = isRecord(src.categories) ? src.categories : {};
+  return {
+    tag_names: stringArray(src.tag_names),
+    extra_tag_names: stringArray(src.extra_tag_names),
+    categories: {
+      meta: recordOr(categories.meta),
+      appearance: recordOr(categories.appearance),
+      context: recordOr(categories.context),
+      production: recordOr(categories.production),
+    },
+    summary: stringOr(src.summary, "Provider output omitted tag summary."),
+    status: src.status === "ready" || src.status === "pending" ? src.status : "pending",
+  };
+}
+
+function normalizeAdDetection(value: unknown): Record<string, unknown> {
+  const src = isRecord(value) ? value : {};
+  return {
+    is_ad: typeof src.is_ad === "boolean" ? src.is_ad : false,
+    categories: stringArray(src.categories),
+    elements: stringArray(src.elements),
+    contacts: stringArray(src.contacts),
+    urls: stringArray(src.urls),
+    reason: stringOr(src.reason, "Provider output did not report ad signals."),
+  };
+}
+
+function normalizeRegion(value: unknown): Record<string, unknown> {
+  const src = isRecord(value) ? value : {};
+  const code = typeof src.code === "string" && REGION_CODES.includes(src.code as typeof REGION_CODES[number])
+    ? src.code
+    : "other";
+  return {
+    code,
+    requested_code: stringOr(src.requested_code, "other"),
+    confidence: numberInRange(src.confidence, 0, 0, 1),
+    reasoning: stringOr(src.reasoning, "Provider output omitted region reasoning."),
+    signals: recordOr(src.signals),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function recordOr(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function stringOr(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function numberInRange(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(value, min), max);
 }
 
 function mediaAnalysisDedupKey(promptVersion: number, inputHash: string): string {

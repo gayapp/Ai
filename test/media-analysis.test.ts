@@ -507,6 +507,34 @@ describe("media_analysis pipeline", () => {
       error_code: ErrorCodes.SCHEMA_VALIDATION_FAILED,
     });
   });
+
+  it("normalizes partial media_analysis JSON into the public output schema", async () => {
+    const { db } = await dispatchWithGeminiResponse(Response.json({
+      candidates: [{ content: { parts: [{ text: JSON.stringify({
+        description: "A simple image.",
+        moderation: { summary: "No obvious issue." },
+      }) }] } }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20 },
+    }));
+
+    expect(db.rows[0]).toMatchObject({
+      status: "ok",
+      error_code: null,
+    });
+    expect(JSON.parse(db.rows[0]!.result_json ?? "{}")).toMatchObject({
+      moderation: {
+        decision: "review",
+        summary: "No obvious issue.",
+      },
+      tags: {
+        status: "pending",
+        categories: { meta: {}, appearance: {}, context: {}, production: {} },
+      },
+      ad_detection: { is_ad: false },
+      face_coordinates: [],
+      region: { code: "other" },
+    });
+  });
 });
 
 function makeRow(id: string, inputHash = "same-input-hash"): AnalyzeRow {
