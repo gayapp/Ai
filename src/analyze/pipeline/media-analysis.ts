@@ -223,7 +223,8 @@ async function tryMediaAnalysisProvider(
 function isFallbackableProviderError(code: string): boolean {
   return code === ErrorCodes.PROVIDER_ERROR ||
     code === ErrorCodes.PROVIDER_TIMEOUT ||
-    code === ErrorCodes.PROVIDER_AUTH_FAILED;
+    code === ErrorCodes.PROVIDER_AUTH_FAILED ||
+    code === ErrorCodes.UNSUPPORTED_CONTENT;
 }
 
 function toMediaAnalysisProvider(provider: AnalyzeProvider): MediaAnalysisProvider {

@@ -362,16 +362,46 @@ describe("media_analysis pipeline", () => {
     expect(db.rows[0]!.delivered_at).toEqual(expect.any(Number));
   });
 
-  it("records unsupported_content for inaccessible or non-image URLs", async () => {
+  it("falls back to xAI when Gemini cannot retrieve the media URL", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { db } = await dispatchWithGeminiResponse(
-      new Response("Unable to retrieve image from file_uri", { status: 400 }),
-    );
+    const db = new FakeD1();
+    db.rows.push(makeRow("r1"));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("generativelanguage.googleapis.com")) {
+        return new Response("Unable to retrieve image from file_uri", { status: 400 });
+      }
+      if (url.includes("api.x.ai")) {
+        return xaiResponse();
+      }
+      return new Response("unexpected url", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await dispatchAnalyzeJob({
+      DB: db,
+      NONCE: new MemKV(),
+      PROMPTS: new MemKV(),
+      DEDUP_CACHE: new MemKV(),
+      CALLBACK_QUEUE: new MemQueue<object>(),
+      GEMINI_API_KEY: "key",
+      GEMINI_MODEL: "gemini-test",
+      GROK_API_KEY: "grok-key",
+      GROK_MEDIA_MODEL: "grok-test",
+      DEDUP_TTL_SECONDS: "604800",
+    } as unknown as Env, {
+      request_id: "r1",
+      app_id: "app_a",
+      biz_type: "media_analysis",
+      created_at_ms: Date.now(),
+    });
 
     expect(db.rows[0]).toMatchObject({
-      status: "error",
-      error_code: ErrorCodes.UNSUPPORTED_CONTENT,
+      status: "ok",
+      provider: "xai",
+      error_code: null,
     });
+    expect(countFetches(fetchMock, "generativelanguage.googleapis.com")).toBe(1);
+    expect(countFetches(fetchMock, "api.x.ai")).toBe(1);
   });
 
   it("records provider_error for Gemini 5xx after retries", async () => {
