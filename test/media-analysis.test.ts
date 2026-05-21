@@ -121,14 +121,12 @@ describe("analyze provider routing", () => {
 });
 
 describe("Gemini media provider", () => {
-  it("uses Gemini file_data URL parts and response schema", async () => {
+  it("fetches image URLs and sends Gemini inline_data parts with response schema", async () => {
     let body: unknown;
-    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
-      body = JSON.parse(init.body as string);
-      return Response.json({
-        candidates: [{ content: { parts: [{ text: JSON.stringify(sampleOutput()) }] } }],
-        usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 22 },
-      });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("cdn.example.com")) return imageResponse("image/png");
+      body = JSON.parse(init?.body as string);
+      return geminiResponse();
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -141,26 +139,27 @@ describe("Gemini media provider", () => {
       timeoutMs: 1000,
     });
 
-    expect(res.inputTokens).toBe(11);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(res.inputTokens).toBe(33);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const firstPart = ((body as { contents: Array<{ parts: unknown[] }> }).contents[0]!.parts[1]) as {
-      file_data: { mime_type: string; file_uri: string };
+      inline_data: { mime_type: string; data: string };
     };
-    expect(firstPart.file_data).toEqual({
+    expect(firstPart.inline_data).toEqual({
       mime_type: "image/png",
-      file_uri: "https://cdn.example.com/1.png",
+      data: "AQID",
     });
     expect(JSON.stringify(body)).toContain("responseSchema");
   });
 
   it("retries transient Gemini 5xx responses", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response("temporary", { status: 503 }))
-      .mockResolvedValueOnce(Response.json({
-        candidates: [{ content: { parts: [{ text: JSON.stringify(sampleOutput()) }] } }],
-        usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 22 },
-      }));
+    let geminiCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("cdn.example.com")) return imageResponse();
+      geminiCalls += 1;
+      return geminiCalls === 1
+        ? new Response("temporary", { status: 503 })
+        : geminiResponse();
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await callGeminiMediaAnalysis({
@@ -173,7 +172,7 @@ describe("Gemini media provider", () => {
     });
 
     expect(res.rawText).toContain("moderation");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(geminiCalls).toBe(2);
   });
 
   it("classifies inaccessible or non-image media as unsupported_content", async () => {
@@ -240,10 +239,10 @@ describe("media_analysis pipeline", () => {
     const callbackQueue = new MemQueue<object>();
     db.rows.push(makeRow("r1"), makeRow("r2"));
 
-    const fetchMock = vi.fn(async () => Response.json({
-      candidates: [{ content: { parts: [{ text: JSON.stringify(sampleOutput()) }] } }],
-      usageMetadata: { promptTokenCount: 33, candidatesTokenCount: 44 },
-    }));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("cdn.example.com")) return imageResponse();
+      return geminiResponse();
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const env = {
@@ -270,7 +269,7 @@ describe("media_analysis pipeline", () => {
       created_at_ms: Date.now(),
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(countFetches(fetchMock, "generativelanguage.googleapis.com")).toBe(1);
     expect(db.rows[0]).toMatchObject({
       status: "ok",
       cached: 0,
@@ -312,10 +311,10 @@ describe("media_analysis pipeline", () => {
       provider_strategy: "auto",
     }));
 
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
-      candidates: [{ content: { parts: [{ text: JSON.stringify(sampleOutput()) }] } }],
-      usageMetadata: { promptTokenCount: 33, candidatesTokenCount: 44 },
-    })));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("cdn.example.com")) return imageResponse();
+      return geminiResponse();
+    }));
 
     const env = {
       DB: db,
@@ -367,6 +366,9 @@ describe("media_analysis pipeline", () => {
     const db = new FakeD1();
     db.rows.push(makeRow("r1"));
     const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("cdn.example.com")) {
+        return imageResponse();
+      }
       if (url.includes("generativelanguage.googleapis.com")) {
         return new Response("Unable to retrieve image from file_uri", { status: 400 });
       }
@@ -410,7 +412,7 @@ describe("media_analysis pipeline", () => {
       new Response("temporary", { status: 503 }),
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(countFetches(fetchMock, "generativelanguage.googleapis.com")).toBe(3);
     expect(db.rows[0]).toMatchObject({
       status: "error",
       error_code: ErrorCodes.PROVIDER_ERROR,
@@ -428,6 +430,9 @@ describe("media_analysis pipeline", () => {
     const callbackQueue = new MemQueue<object>();
     let geminiHealthy = false;
     const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("cdn.example.com")) {
+        return imageResponse();
+      }
       if (url.includes("generativelanguage.googleapis.com")) {
         if (!geminiHealthy) return new Response("temporary", { status: 503 });
         return geminiResponse();
@@ -544,6 +549,12 @@ function geminiResponse(): Response {
   });
 }
 
+function imageResponse(mimeType = "image/jpeg"): Response {
+  return new Response(new Uint8Array([1, 2, 3]), {
+    headers: { "content-type": mimeType },
+  });
+}
+
 function xaiResponse(): Response {
   return Response.json({
     model: "grok-test",
@@ -562,7 +573,10 @@ async function dispatchWithGeminiResponse(response: Response): Promise<{
 }> {
   const db = new FakeD1();
   db.rows.push(makeRow("r1"));
-  const fetchMock = vi.fn(async () => response.clone());
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url.includes("cdn.example.com")) return imageResponse();
+    return response.clone();
+  });
   vi.stubGlobal("fetch", fetchMock);
 
   await dispatchAnalyzeJob({

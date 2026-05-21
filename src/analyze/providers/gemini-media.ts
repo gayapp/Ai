@@ -3,6 +3,8 @@ import { MediaAnalysisResponseSchema, type MediaAnalysisInputT } from "../schema
 
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 25;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_TOTAL_IMAGE_BYTES = 24 * 1024 * 1024;
 
 export interface GeminiMediaResult {
   rawText: string;
@@ -29,14 +31,11 @@ export async function callGeminiMediaAnalysis(
     model,
   )}:generateContent?key=${apiKey}`;
 
+  const startedAt = Date.now();
+  const imageParts = await loadInlineImageParts(args.input.image_urls, args.timeoutMs);
   const parts: unknown[] = [
     { text: args.prompt },
-    ...args.input.image_urls.map((imageUrl) => ({
-      file_data: {
-        mime_type: guessImageMimeType(imageUrl),
-        file_uri: imageUrl,
-      },
-    })),
+    ...imageParts,
   ];
 
   const body = {
@@ -55,7 +54,6 @@ export async function callGeminiMediaAnalysis(
     ],
   };
 
-  const startedAt = Date.now();
   let res: Response | null = null;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
@@ -159,19 +157,120 @@ interface GeminiResponse {
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
 }
 
-function guessImageMimeType(url: string): string {
-  const clean = url.split("?")[0]?.toLowerCase() ?? "";
-  if (clean.endsWith(".png")) return "image/png";
-  if (clean.endsWith(".webp")) return "image/webp";
-  if (clean.endsWith(".heic")) return "image/heic";
-  if (clean.endsWith(".heif")) return "image/heif";
-  return "image/jpeg";
-}
-
 async function safeText(res: Response): Promise<string> {
   try {
     return await res.text();
   } catch {
     return "";
   }
+}
+
+async function loadInlineImageParts(
+  imageUrls: string[],
+  timeoutMs: number,
+): Promise<Array<{ inline_data: { mime_type: string; data: string } }>> {
+  let totalBytes = 0;
+  const parts: Array<{ inline_data: { mime_type: string; data: string } }> = [];
+  for (const imageUrl of imageUrls) {
+    const image = await fetchImageForInlineData(imageUrl, timeoutMs);
+    totalBytes += image.bytes.byteLength;
+    if (totalBytes > MAX_TOTAL_IMAGE_BYTES) {
+      throw new AppError(
+        ErrorCodes.UNSUPPORTED_CONTENT,
+        422,
+        `gemini media images exceed total inline size limit ${MAX_TOTAL_IMAGE_BYTES}`,
+      );
+    }
+    parts.push({
+      inline_data: {
+        mime_type: image.mimeType,
+        data: arrayBufferToBase64(image.bytes),
+      },
+    });
+  }
+  return parts;
+}
+
+async function fetchImageForInlineData(
+  imageUrl: string,
+  timeoutMs: number,
+): Promise<{ mimeType: string; bytes: ArrayBuffer }> {
+  let res: Response;
+  try {
+    res = await fetch(imageUrl, {
+      method: "GET",
+      headers: { accept: "image/*" },
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 30_000)),
+    });
+  } catch (e) {
+    if (e instanceof Error && e.name === "TimeoutError") {
+      throw new AppError(ErrorCodes.PROVIDER_TIMEOUT, 504, "gemini media image fetch timeout");
+    }
+    throw new AppError(
+      ErrorCodes.UNSUPPORTED_CONTENT,
+      422,
+      `gemini media image fetch failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+
+  if (!res.ok) {
+    throw new AppError(
+      ErrorCodes.UNSUPPORTED_CONTENT,
+      422,
+      `gemini media image fetch http ${res.status}`,
+      (await safeText(res)).slice(0, 500),
+    );
+  }
+
+  const mimeType = normalizeImageMimeType(res.headers.get("content-type"), imageUrl);
+  const contentLength = res.headers.get("content-length");
+  if (contentLength && Number(contentLength) > MAX_IMAGE_BYTES) {
+    throw new AppError(
+      ErrorCodes.UNSUPPORTED_CONTENT,
+      422,
+      `gemini media image exceeds inline size limit ${MAX_IMAGE_BYTES}`,
+    );
+  }
+
+  const bytes = await res.arrayBuffer();
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) {
+    throw new AppError(
+      ErrorCodes.UNSUPPORTED_CONTENT,
+      422,
+      `gemini media image size ${bytes.byteLength} is not supported`,
+    );
+  }
+  return { mimeType, bytes };
+}
+
+function normalizeImageMimeType(contentType: string | null, imageUrl: string): string {
+  const mimeType = contentType?.split(";")[0]?.trim().toLowerCase();
+  if (mimeType?.startsWith("image/")) return mimeType;
+  const guessed = guessImageMimeType(imageUrl);
+  if (guessed) return guessed;
+  throw new AppError(
+    ErrorCodes.UNSUPPORTED_CONTENT,
+    422,
+    `gemini media URL is not an image; content-type=${contentType ?? "missing"}`,
+  );
+}
+
+function guessImageMimeType(url: string): string | null {
+  const clean = url.split("?")[0]?.toLowerCase() ?? "";
+  if (clean.endsWith(".jpg") || clean.endsWith(".jpeg")) return "image/jpeg";
+  if (clean.endsWith(".png")) return "image/png";
+  if (clean.endsWith(".webp")) return "image/webp";
+  if (clean.endsWith(".heic")) return "image/heic";
+  if (clean.endsWith(".heif")) return "image/heif";
+  return null;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
 }
