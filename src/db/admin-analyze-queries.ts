@@ -23,6 +23,36 @@ export interface AnalyzeSummaryRow {
   output_bytes_total: number;
 }
 
+export interface AnalyzeBacklogRow {
+  pending_total: number;
+  pending_older_than_5m: number;
+  pending_older_than_30m: number;
+  pending_older_than_2h: number;
+  pending_lt_5m: number;
+  pending_5m_30m: number;
+  pending_30m_2h: number;
+  pending_gt_2h: number;
+  pull_unacked_total: number;
+  pull_unacked_older_than_5m: number;
+  pull_unacked_older_than_30m: number;
+  pull_unacked_older_than_2h: number;
+  pull_unacked_lt_5m: number;
+  pull_unacked_5m_30m: number;
+  pull_unacked_30m_2h: number;
+  pull_unacked_gt_2h: number;
+  callback_undelivered_total: number;
+  callback_undelivered_older_than_5m: number;
+  callback_undelivered_older_than_30m: number;
+  callback_undelivered_older_than_2h: number;
+  callback_undelivered_lt_5m: number;
+  callback_undelivered_5m_30m: number;
+  callback_undelivered_30m_2h: number;
+  callback_undelivered_gt_2h: number;
+  oldest_pending_at: number | null;
+  oldest_pull_unacked_at: number | null;
+  oldest_callback_undelivered_at: number | null;
+}
+
 export type AnalyzeGrayMetricRow = Pick<
   AnalyzeRow,
   | "id"
@@ -143,6 +173,67 @@ export async function summarizeAnalyzeRequests(
   };
 }
 
+export async function summarizeAnalyzeBacklog(
+  db: D1Database,
+  opts: { app_id?: string; from_ms: number; to_ms: number; now_ms: number },
+): Promise<AnalyzeBacklogRow> {
+  const where: string[] = ["created_at >= ?", "created_at <= ?"];
+  const vals: unknown[] = [opts.from_ms, opts.to_ms];
+  if (opts.app_id) {
+    where.push("app_id = ?");
+    vals.push(opts.app_id);
+  }
+  const cutoff5m = opts.now_ms - 5 * 60 * 1000;
+  const cutoff30m = opts.now_ms - 30 * 60 * 1000;
+  const cutoff2h = opts.now_ms - 2 * 60 * 60 * 1000;
+
+  const row = await db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending_total,
+         COALESCE(SUM(CASE WHEN status = 'pending' AND created_at < ? THEN 1 ELSE 0 END), 0) AS pending_older_than_5m,
+         COALESCE(SUM(CASE WHEN status = 'pending' AND created_at < ? THEN 1 ELSE 0 END), 0) AS pending_older_than_30m,
+         COALESCE(SUM(CASE WHEN status = 'pending' AND created_at < ? THEN 1 ELSE 0 END), 0) AS pending_older_than_2h,
+         COALESCE(SUM(CASE WHEN status = 'pending' AND created_at >= ? THEN 1 ELSE 0 END), 0) AS pending_lt_5m,
+         COALESCE(SUM(CASE WHEN status = 'pending' AND created_at < ? AND created_at >= ? THEN 1 ELSE 0 END), 0) AS pending_5m_30m,
+         COALESCE(SUM(CASE WHEN status = 'pending' AND created_at < ? AND created_at >= ? THEN 1 ELSE 0 END), 0) AS pending_30m_2h,
+         COALESCE(SUM(CASE WHEN status = 'pending' AND created_at < ? THEN 1 ELSE 0 END), 0) AS pending_gt_2h,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('pull','both') AND acked_at IS NULL THEN 1 ELSE 0 END), 0) AS pull_unacked_total,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('pull','both') AND acked_at IS NULL AND created_at < ? THEN 1 ELSE 0 END), 0) AS pull_unacked_older_than_5m,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('pull','both') AND acked_at IS NULL AND created_at < ? THEN 1 ELSE 0 END), 0) AS pull_unacked_older_than_30m,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('pull','both') AND acked_at IS NULL AND created_at < ? THEN 1 ELSE 0 END), 0) AS pull_unacked_older_than_2h,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('pull','both') AND acked_at IS NULL AND created_at >= ? THEN 1 ELSE 0 END), 0) AS pull_unacked_lt_5m,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('pull','both') AND acked_at IS NULL AND created_at < ? AND created_at >= ? THEN 1 ELSE 0 END), 0) AS pull_unacked_5m_30m,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('pull','both') AND acked_at IS NULL AND created_at < ? AND created_at >= ? THEN 1 ELSE 0 END), 0) AS pull_unacked_30m_2h,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('pull','both') AND acked_at IS NULL AND created_at < ? THEN 1 ELSE 0 END), 0) AS pull_unacked_gt_2h,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL THEN 1 ELSE 0 END), 0) AS callback_undelivered_total,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL AND created_at < ? THEN 1 ELSE 0 END), 0) AS callback_undelivered_older_than_5m,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL AND created_at < ? THEN 1 ELSE 0 END), 0) AS callback_undelivered_older_than_30m,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL AND created_at < ? THEN 1 ELSE 0 END), 0) AS callback_undelivered_older_than_2h,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL AND created_at >= ? THEN 1 ELSE 0 END), 0) AS callback_undelivered_lt_5m,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL AND created_at < ? AND created_at >= ? THEN 1 ELSE 0 END), 0) AS callback_undelivered_5m_30m,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL AND created_at < ? AND created_at >= ? THEN 1 ELSE 0 END), 0) AS callback_undelivered_30m_2h,
+         COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL AND created_at < ? THEN 1 ELSE 0 END), 0) AS callback_undelivered_gt_2h,
+         MIN(CASE WHEN status = 'pending' THEN created_at END) AS oldest_pending_at,
+         MIN(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('pull','both') AND acked_at IS NULL THEN created_at END) AS oldest_pull_unacked_at,
+         MIN(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL THEN created_at END) AS oldest_callback_undelivered_at
+       FROM analyze_requests
+       WHERE ${where.join(" AND ")}`,
+    )
+    .bind(
+      cutoff5m, cutoff30m, cutoff2h,
+      cutoff5m, cutoff5m, cutoff30m, cutoff30m, cutoff2h, cutoff2h,
+      cutoff5m, cutoff30m, cutoff2h,
+      cutoff5m, cutoff5m, cutoff30m, cutoff30m, cutoff2h, cutoff2h,
+      cutoff5m, cutoff30m, cutoff2h,
+      cutoff5m, cutoff5m, cutoff30m, cutoff30m, cutoff2h, cutoff2h,
+      ...vals,
+    )
+    .first<AnalyzeBacklogRow>();
+
+  return row ?? emptyBacklog();
+}
+
 export async function loadAnalyzeGrayMetricRows(
   db: D1Database,
   opts: { app_id?: string; from_ms: number; to_ms: number; limit?: number },
@@ -170,4 +261,36 @@ export async function loadAnalyzeGrayMetricRows(
     .bind(...vals)
     .all<AnalyzeGrayMetricRow>();
   return results;
+}
+
+function emptyBacklog(): AnalyzeBacklogRow {
+  return {
+    pending_total: 0,
+    pending_older_than_5m: 0,
+    pending_older_than_30m: 0,
+    pending_older_than_2h: 0,
+    pending_lt_5m: 0,
+    pending_5m_30m: 0,
+    pending_30m_2h: 0,
+    pending_gt_2h: 0,
+    pull_unacked_total: 0,
+    pull_unacked_older_than_5m: 0,
+    pull_unacked_older_than_30m: 0,
+    pull_unacked_older_than_2h: 0,
+    pull_unacked_lt_5m: 0,
+    pull_unacked_5m_30m: 0,
+    pull_unacked_30m_2h: 0,
+    pull_unacked_gt_2h: 0,
+    callback_undelivered_total: 0,
+    callback_undelivered_older_than_5m: 0,
+    callback_undelivered_older_than_30m: 0,
+    callback_undelivered_older_than_2h: 0,
+    callback_undelivered_lt_5m: 0,
+    callback_undelivered_5m_30m: 0,
+    callback_undelivered_30m_2h: 0,
+    callback_undelivered_gt_2h: 0,
+    oldest_pending_at: null,
+    oldest_pull_unacked_at: null,
+    oldest_callback_undelivered_at: null,
+  };
 }

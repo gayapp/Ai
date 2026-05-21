@@ -10,6 +10,7 @@ import {
 } from "../db/queries.ts";
 import {
   loadAnalyzeGrayMetricRows,
+  summarizeAnalyzeBacklog,
   summarizeAnalyzeRequests,
   type AnalyzeGrayMetricRow,
 } from "../db/admin-analyze-queries.ts";
@@ -97,6 +98,63 @@ adminStatsRouter.get("/analyze-summary", async (c) => {
       output: row.output_tokens,
     },
     output_bytes_total: row.output_bytes_total,
+  });
+});
+
+adminStatsRouter.get("/analyze-backlog", async (c) => {
+  const { from_ms, to_ms } = resolveRange(c);
+  const app_id = c.req.query("app_id") ?? undefined;
+  const row = await summarizeAnalyzeBacklog(c.env.DB, {
+    app_id,
+    from_ms,
+    to_ms,
+    now_ms: Date.now(),
+  });
+  return c.json({
+    from: new Date(from_ms).toISOString(),
+    to: new Date(to_ms).toISOString(),
+    app_id: app_id ?? null,
+    pending: {
+      total: row.pending_total,
+      older_than_5m: row.pending_older_than_5m,
+      older_than_30m: row.pending_older_than_30m,
+      older_than_2h: row.pending_older_than_2h,
+      oldest_at: row.oldest_pending_at ? new Date(row.oldest_pending_at).toISOString() : null,
+      age_buckets: {
+        lt_5m: row.pending_lt_5m,
+        m5_30m: row.pending_5m_30m,
+        m30_2h: row.pending_30m_2h,
+        gt_2h: row.pending_gt_2h,
+      },
+    },
+    pull_unacked: {
+      total: row.pull_unacked_total,
+      older_than_5m: row.pull_unacked_older_than_5m,
+      older_than_30m: row.pull_unacked_older_than_30m,
+      older_than_2h: row.pull_unacked_older_than_2h,
+      oldest_at: row.oldest_pull_unacked_at ? new Date(row.oldest_pull_unacked_at).toISOString() : null,
+      age_buckets: {
+        lt_5m: row.pull_unacked_lt_5m,
+        m5_30m: row.pull_unacked_5m_30m,
+        m30_2h: row.pull_unacked_30m_2h,
+        gt_2h: row.pull_unacked_gt_2h,
+      },
+    },
+    callback_undelivered: {
+      total: row.callback_undelivered_total,
+      older_than_5m: row.callback_undelivered_older_than_5m,
+      older_than_30m: row.callback_undelivered_older_than_30m,
+      older_than_2h: row.callback_undelivered_older_than_2h,
+      oldest_at: row.oldest_callback_undelivered_at
+        ? new Date(row.oldest_callback_undelivered_at).toISOString()
+        : null,
+      age_buckets: {
+        lt_5m: row.callback_undelivered_lt_5m,
+        m5_30m: row.callback_undelivered_5m_30m,
+        m30_2h: row.callback_undelivered_30m_2h,
+        gt_2h: row.callback_undelivered_gt_2h,
+      },
+    },
   });
 });
 

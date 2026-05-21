@@ -201,6 +201,35 @@ Authorization: Bearer <ADMIN_TOKEN>
 }
 ```
 
+### `GET /admin/stats/analyze-backlog`
+
+**Query**：`?from=&to=&app_id=`
+
+返回 analyze 交付积压统计，按年龄桶拆分：
+
+```json
+{
+  "pending": {
+    "total": 1,
+    "older_than_5m": 0,
+    "oldest_at": "2026-05-22T00:00:00.000Z",
+    "age_buckets": { "lt_5m": 1, "m5_30m": 0, "m30_2h": 0, "gt_2h": 0 }
+  },
+  "pull_unacked": {
+    "total": 0,
+    "older_than_5m": 0,
+    "oldest_at": null,
+    "age_buckets": { "lt_5m": 0, "m5_30m": 0, "m30_2h": 0, "gt_2h": 0 }
+  },
+  "callback_undelivered": {
+    "total": 0,
+    "older_than_5m": 0,
+    "oldest_at": null,
+    "age_buckets": { "lt_5m": 0, "m5_30m": 0, "m30_2h": 0, "gt_2h": 0 }
+  }
+}
+```
+
 ### `GET /admin/stats/top-users?app_id=...&limit=20`
 被拒最多的用户（反滥用）。
 
@@ -261,6 +290,41 @@ Authorization: Bearer <ADMIN_TOKEN>
 - `callback_url`
 
 用于 IRC 按 `request_id` 或 `biz_id` 对账。完整接入方 pull 契约见 [14-analyze-records.md](14-analyze-records.md)。
+
+---
+
+## Providers（模型与熔断状态）
+
+### `GET /admin/providers/status`
+
+只读接口，不请求上游模型，也不会触发 Telegram 告警。用于 Admin UI 展示当前模型配置、secret 是否存在、KV circuit breaker 状态。
+
+```json
+{
+  "generated_at": "2026-05-22T00:00:00.000Z",
+  "secrets": {
+    "grok_configured": true,
+    "gemini_configured": true
+  },
+  "models": {
+    "grok": "grok-4-fast-non-reasoning",
+    "gemini": "gemini-2.5-flash"
+  },
+  "circuits": [
+    {
+      "provider": "gemini",
+      "biz_type": "media_analysis",
+      "failures": 5,
+      "state": "open",
+      "seconds_to_close": 120,
+      "open_until": "2026-05-22T00:02:00.000Z",
+      "last_failure_at": "2026-05-22T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+需要真实请求上游并可能触发告警时，使用 `POST /admin/alerts/provider-health`。
 
 ---
 

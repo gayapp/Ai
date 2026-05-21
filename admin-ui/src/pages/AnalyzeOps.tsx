@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Apps,
   Stats,
+  type AnalyzeBacklogBucket,
+  type AnalyzeBacklogData,
   type AnalyzeGrayData,
   type AppConfig,
   type PercentileData,
@@ -27,6 +29,7 @@ export default function AnalyzeOpsPage() {
   const [baseline, setBaseline] = useState("15000");
   const [limit, setLimit] = useState(10000);
   const [data, setData] = useState<AnalyzeGrayData | null>(null);
+  const [backlog, setBacklog] = useState<AnalyzeBacklogData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -44,13 +47,21 @@ export default function AnalyzeOpsPage() {
     const { from, to } = periodRange(period);
     const baselineNum = Number(baseline);
     try {
-      setData(await Stats.analyzeGray({
+      const query = {
         app_id: appId || undefined,
         from,
         to,
-        limit,
-        baseline_p95_ms: Number.isFinite(baselineNum) && baselineNum > 0 ? baselineNum : undefined,
-      }));
+      };
+      const [gray, backlogData] = await Promise.all([
+        Stats.analyzeGray({
+          ...query,
+          limit,
+          baseline_p95_ms: Number.isFinite(baselineNum) && baselineNum > 0 ? baselineNum : undefined,
+        }),
+        Stats.analyzeBacklog(query),
+      ]);
+      setData(gray);
+      setBacklog(backlogData);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -109,6 +120,30 @@ export default function AnalyzeOpsPage() {
             <Metric label="Callback undelivered" value={data.delivery.callback_undelivered} color={data.delivery.callback_undelivered > 0 ? "warn" : "good"} />
             <Metric label="Dedup hit" value={pct(data.dedup.hit_rate)} color={data.dedup.hit_rate >= data.dedup.expected_min_hit_rate ? "good" : "warn"} />
           </div>
+
+          {backlog && (
+            <div className="card">
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <h3 style={{ margin: 0 }}>Backlog</h3>
+                <a href={buildRecordsHref({ appId, period, status: "pending" })}>查看 pending</a>
+              </div>
+              <div className="metric-grid mt16">
+                <BacklogMetric label="Pending" bucket={backlog.pending} warnAt={1} badAt={1} />
+                <BacklogMetric label="Pull unacked" bucket={backlog.pull_unacked} warnAt={1} badAt={20} />
+                <BacklogMetric label="Callback undelivered" bucket={backlog.callback_undelivered} warnAt={1} badAt={20} />
+              </div>
+              <table>
+                <thead>
+                  <tr><th>Queue</th><th>&lt;5m</th><th>5m-30m</th><th>30m-2h</th><th>&gt;2h</th><th>Oldest</th></tr>
+                </thead>
+                <tbody>
+                  <BacklogRow label="pending" bucket={backlog.pending} />
+                  <BacklogRow label="pull_unacked" bucket={backlog.pull_unacked} />
+                  <BacklogRow label="callback_undelivered" bucket={backlog.callback_undelivered} />
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="card">
             <div className="row" style={{ justifyContent: "space-between" }}>
@@ -184,6 +219,35 @@ function Metric({ label, value, color }: { label: string; value: React.ReactNode
       <div className="label">{label}</div>
       <div className="value" style={style}>{value}</div>
     </div>
+  );
+}
+
+function BacklogMetric({ label, bucket, warnAt, badAt }: {
+  label: string;
+  bucket: AnalyzeBacklogBucket;
+  warnAt: number;
+  badAt: number;
+}) {
+  const color = bucket.older_than_5m >= badAt ? "bad" : bucket.total >= warnAt ? "warn" : "good";
+  return (
+    <Metric
+      label={label}
+      value={bucket.total}
+      color={color}
+    />
+  );
+}
+
+function BacklogRow({ label, bucket }: { label: string; bucket: AnalyzeBacklogBucket }) {
+  return (
+    <tr>
+      <td><code>{label}</code></td>
+      <td className="monospace">{bucket.age_buckets.lt_5m}</td>
+      <td className="monospace">{bucket.age_buckets.m5_30m}</td>
+      <td className="monospace">{bucket.age_buckets.m30_2h}</td>
+      <td className="monospace">{bucket.age_buckets.gt_2h}</td>
+      <td className="monospace">{bucket.oldest_at ? new Date(bucket.oldest_at).toLocaleString() : "-"}</td>
+    </tr>
   );
 }
 

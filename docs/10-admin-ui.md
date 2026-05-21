@@ -24,6 +24,7 @@
 | `/analyze-ops` | analyze 灰度门禁：Ready、错误率、P95、pull/callback 积压、分布 |
 | `/analyze-records` | analyze 长留存记录：按 app / biz / status / delivery / biz_id / 时间窗过滤 |
 | `/callbacks` | callback 投递记录：支持只看失败或未投递 |
+| `/providers` | Provider 状态：模型配置、secret 配置状态、KV 熔断状态、手动 health check |
 | `/apps` | app 管理：新建、编辑、禁用、轮换 secret，支持 `IRC analyze` 预设 |
 | `/prompts` | prompt 管理：moderate / analyze prompt 版本、发布、回滚 |
 | `/alerts` | Telegram 告警测试、阈值检查、provider health 手动检查 |
@@ -59,6 +60,12 @@
 - `pull_unacked > 0`：检查 IRC ack cron。
 - `callback_undelivered > 0`：检查 IRC callback endpoint。
 - provider 相关错误：去 `/alerts` 点 `检查 Provider 健康`。
+
+灰度页的 Backlog 区域会按 `<5m` / `5m-30m` / `30m-2h` / `>2h` 展示：
+
+- `pending`：请求仍未完成，通常看 queue 或 provider。
+- `pull_unacked`：结果已完成但接入方未 ack，通常看 IRC pull/ack cron。
+- `callback_undelivered`：结果已完成但 callback 未成功投递，通常看 callback URL、网络或重试状态。
 
 ### 单条 analyze 追查
 
@@ -124,6 +131,19 @@ Cron 自动行为：
 - 每小时跑 provider health。
 
 阈值在 `src/alerts/telegram.ts` 中定义，改动后需要重新部署 Worker。
+
+## Provider 状态
+
+路径：`/providers`
+
+页面默认只调用 `GET /admin/providers/status`，不会请求上游，也不会触发告警。展示：
+
+- Grok / Gemini secret 是否已配置。
+- 当前 Grok / Gemini 模型名。
+- global circuit：moderate 路由熔断状态。
+- `media_analysis` / `media_intro` circuit：analyze 路由熔断状态。
+
+`Run health check` 会调用 `POST /admin/alerts/provider-health`，真实请求上游 provider；如 provider 异常，可能按现有去重规则发送 Telegram 告警。
 
 ## 技术栈
 

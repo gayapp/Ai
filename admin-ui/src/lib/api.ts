@@ -232,6 +232,29 @@ export interface AnalyzeGrayData {
   by_biz_type: Record<string, number>;
 }
 
+export interface AnalyzeBacklogBucket {
+  total: number;
+  older_than_5m: number;
+  older_than_30m: number;
+  older_than_2h: number;
+  oldest_at: string | null;
+  age_buckets: {
+    lt_5m: number;
+    m5_30m: number;
+    m30_2h: number;
+    gt_2h: number;
+  };
+}
+
+export interface AnalyzeBacklogData {
+  from: string;
+  to: string;
+  app_id: string | null;
+  pending: AnalyzeBacklogBucket;
+  pull_unacked: AnalyzeBacklogBucket;
+  callback_undelivered: AnalyzeBacklogBucket;
+}
+
 export interface AnalyzeRecordRow {
   request_id: string;
   app_id: string;
@@ -271,6 +294,35 @@ export interface CallbackRow {
   next_retry_at: string | null;
   delivered_at: string | null;
   created_at: string;
+}
+
+export interface ProviderCircuit {
+  provider: "grok" | "gemini" | "xai";
+  biz_type: string | null;
+  failures: number;
+  open_until: string | null;
+  last_failure_at: string | null;
+  state: "closed" | "open" | "half_open";
+  seconds_to_close: number;
+}
+
+export interface ProviderStatusData {
+  generated_at: string;
+  secrets: {
+    grok_configured: boolean;
+    gemini_configured: boolean;
+  };
+  models: {
+    grok: string;
+    gemini: string;
+  };
+  circuits: ProviderCircuit[];
+}
+
+export interface ProviderHealthData {
+  grok: { ok: boolean; reason?: string; raw?: unknown };
+  gemini: { ok: boolean; reason?: string };
+  fired: string[];
 }
 
 export const Apps = {
@@ -325,6 +377,8 @@ export const Stats = {
     api<SummaryData>(`/admin/stats/summary${qs(q)}`),
   analyzeSummary: (q: { from?: string; to?: string; app_id?: string } = {}) =>
     api<AnalyzeSummaryData>(`/admin/stats/analyze-summary${qs(q)}`),
+  analyzeBacklog: (q: { from?: string; to?: string; app_id?: string } = {}) =>
+    api<AnalyzeBacklogData>(`/admin/stats/analyze-backlog${qs(q)}`),
   analyzeGray: (q: {
     from?: string;
     to?: string;
@@ -374,8 +428,12 @@ export const Alerts = {
     "/admin/alerts/test", { method: "POST" }),
   check: () => api<{ checks: string[]; fired: string[] }>(
     "/admin/alerts/check", { method: "POST" }),
-  providerHealth: () => api<unknown>(
+  providerHealth: () => api<ProviderHealthData>(
     "/admin/alerts/provider-health", { method: "POST" }),
+};
+
+export const Providers = {
+  status: () => api<ProviderStatusData>("/admin/providers/status"),
 };
 
 function qs(o: Record<string, string | number | undefined>): string {

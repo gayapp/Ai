@@ -26,6 +26,17 @@ interface CircuitState {
 }
 
 type CircuitProvider = Provider | AnalyzeProvider;
+type KnownCircuitProvider = "grok" | "gemini" | "xai";
+
+export interface CircuitSnapshot {
+  provider: KnownCircuitProvider;
+  biz_type: AnalyzeBizType | null;
+  failures: number;
+  open_until: string | null;
+  last_failure_at: string | null;
+  state: "closed" | "open" | "half_open";
+  seconds_to_close: number;
+}
 
 function key(provider: CircuitProvider, bizType?: AnalyzeBizType): string {
   return bizType ? `cb:${provider}:${bizType}` : `cb:${provider}`;
@@ -105,7 +116,33 @@ export async function recordAuthFailure(
   }, bizType);
 }
 
-export async function getCircuitSnapshot(kv: KVNamespace): Promise<Record<Provider, CircuitState>> {
-  const [g, gm] = await Promise.all([load(kv, "grok"), load(kv, "gemini")]);
-  return { grok: g, gemini: gm };
+export async function getCircuitSnapshot(kv: KVNamespace): Promise<CircuitSnapshot[]> {
+  const now = Date.now();
+  const providers: KnownCircuitProvider[] = ["grok", "gemini", "xai"];
+  const analyzeBizTypes: AnalyzeBizType[] = ["media_analysis", "media_intro"];
+  const keys: Array<{ provider: KnownCircuitProvider; bizType?: AnalyzeBizType }> = [
+    ...providers.map((provider) => ({ provider })),
+    ...(["gemini", "xai"] as KnownCircuitProvider[]).flatMap((provider) =>
+      analyzeBizTypes.map((bizType) => ({ provider, bizType })),
+    ),
+  ];
+  const states = await Promise.all(
+    keys.map(async (item) => ({
+      ...item,
+      state: await load(kv, item.provider, item.bizType),
+    })),
+  );
+  return states.map(({ provider, bizType, state }) => {
+    const open = state.openUntil > now;
+    const halfOpen = state.openUntil > 0 && state.openUntil <= now;
+    return {
+      provider,
+      biz_type: bizType ?? null,
+      failures: state.failures,
+      open_until: state.openUntil ? new Date(state.openUntil).toISOString() : null,
+      last_failure_at: state.lastFailure ? new Date(state.lastFailure).toISOString() : null,
+      state: open ? "open" : halfOpen ? "half_open" : "closed",
+      seconds_to_close: open ? Math.ceil((state.openUntil - now) / 1000) : 0,
+    };
+  });
 }

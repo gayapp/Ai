@@ -53,6 +53,9 @@ class FakeStmt {
         output_bytes_total: this.db.rows.reduce((n, r) => n + (r.result_json?.length ?? 0), 0),
       } as T;
     }
+    if (this.sql.includes("pending_total")) {
+      return makeBacklogRow(this.db.rows) as T;
+    }
     return null;
   }
 }
@@ -157,7 +160,105 @@ describe("admin analyze records", () => {
     expect(body.dedup.hit_rate).toBe(0.5);
     expect(body.by_biz_type).toEqual({ media_analysis: 3, media_intro: 1 });
   });
+
+  it("reports analyze backlog age buckets for ops console", async () => {
+    const now = Date.now();
+    const rows = [
+      makeRow("r004", "media_analysis", "video-4", "pending", null, {
+        created_at: now - 3 * 60 * 1000,
+        completed_at: null,
+      }),
+      makeRow("r003", "media_intro", "video-3", "pending", null, {
+        created_at: now - 40 * 60 * 1000,
+        completed_at: null,
+      }),
+      makeRow("r002", "media_analysis", "video-2", "ok", { summary: "done" }, {
+        delivered_at: now,
+        acked_at: null,
+        created_at: now - 10 * 60 * 1000,
+      }),
+      makeRow("r001", "media_analysis", "video-1", "ok", { summary: "done" }, {
+        delivered_at: null,
+        acked_at: now,
+        created_at: now - 3 * 60 * 60 * 1000,
+      }),
+    ];
+    const app = makeApp();
+    const env = makeEnv(rows);
+    const res = await app.fetch(new Request("http://local/admin/stats/analyze-backlog", {
+      headers: adminHeaders(),
+    }), env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      pending: { total: number; older_than_30m: number; age_buckets: Record<string, number> };
+      pull_unacked: { total: number; older_than_5m: number };
+      callback_undelivered: { total: number; older_than_2h: number };
+    };
+    expect(body.pending.total).toBe(2);
+    expect(body.pending.older_than_30m).toBe(1);
+    expect(body.pending.age_buckets.lt_5m).toBe(1);
+    expect(body.pull_unacked).toMatchObject({ total: 1, older_than_5m: 1 });
+    expect(body.callback_undelivered).toMatchObject({ total: 1, older_than_2h: 1 });
+  });
 });
+
+function makeBacklogRow(rows: AnalyzeRow[]) {
+  const now = Date.now();
+  const cutoff5m = now - 5 * 60 * 1000;
+  const cutoff30m = now - 30 * 60 * 1000;
+  const cutoff2h = now - 2 * 60 * 60 * 1000;
+  const pending = rows.filter((r) => r.status === "pending");
+  const pull = rows.filter(
+    (r) => (r.status === "ok" || r.status === "error") &&
+      (r.delivery_mode === "pull" || r.delivery_mode === "both") &&
+      !r.acked_at,
+  );
+  const callback = rows.filter(
+    (r) => (r.status === "ok" || r.status === "error") &&
+      (r.delivery_mode === "callback" || r.delivery_mode === "both") &&
+      !r.delivered_at,
+  );
+  const buckets = (subset: AnalyzeRow[]) => ({
+    lt_5m: subset.filter((r) => r.created_at >= cutoff5m).length,
+    m5_30m: subset.filter((r) => r.created_at < cutoff5m && r.created_at >= cutoff30m).length,
+    m30_2h: subset.filter((r) => r.created_at < cutoff30m && r.created_at >= cutoff2h).length,
+    gt_2h: subset.filter((r) => r.created_at < cutoff2h).length,
+  });
+  const oldest = (subset: AnalyzeRow[]) =>
+    subset.length ? Math.min(...subset.map((r) => r.created_at)) : null;
+  const pendingBuckets = buckets(pending);
+  const pullBuckets = buckets(pull);
+  const callbackBuckets = buckets(callback);
+  return {
+    pending_total: pending.length,
+    pending_older_than_5m: pending.filter((r) => r.created_at < cutoff5m).length,
+    pending_older_than_30m: pending.filter((r) => r.created_at < cutoff30m).length,
+    pending_older_than_2h: pending.filter((r) => r.created_at < cutoff2h).length,
+    pending_lt_5m: pendingBuckets.lt_5m,
+    pending_5m_30m: pendingBuckets.m5_30m,
+    pending_30m_2h: pendingBuckets.m30_2h,
+    pending_gt_2h: pendingBuckets.gt_2h,
+    pull_unacked_total: pull.length,
+    pull_unacked_older_than_5m: pull.filter((r) => r.created_at < cutoff5m).length,
+    pull_unacked_older_than_30m: pull.filter((r) => r.created_at < cutoff30m).length,
+    pull_unacked_older_than_2h: pull.filter((r) => r.created_at < cutoff2h).length,
+    pull_unacked_lt_5m: pullBuckets.lt_5m,
+    pull_unacked_5m_30m: pullBuckets.m5_30m,
+    pull_unacked_30m_2h: pullBuckets.m30_2h,
+    pull_unacked_gt_2h: pullBuckets.gt_2h,
+    callback_undelivered_total: callback.length,
+    callback_undelivered_older_than_5m: callback.filter((r) => r.created_at < cutoff5m).length,
+    callback_undelivered_older_than_30m: callback.filter((r) => r.created_at < cutoff30m).length,
+    callback_undelivered_older_than_2h: callback.filter((r) => r.created_at < cutoff2h).length,
+    callback_undelivered_lt_5m: callbackBuckets.lt_5m,
+    callback_undelivered_5m_30m: callbackBuckets.m5_30m,
+    callback_undelivered_30m_2h: callbackBuckets.m30_2h,
+    callback_undelivered_gt_2h: callbackBuckets.gt_2h,
+    oldest_pending_at: oldest(pending),
+    oldest_pull_unacked_at: oldest(pull),
+    oldest_callback_undelivered_at: oldest(callback),
+  };
+}
 
 function makeApp(): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>({ strict: false });
