@@ -7,7 +7,7 @@
 - **Prod API**：<https://aicenter-api.1.gay> / <https://ai-guard.schetkovvlad.workers.dev>
 - **Admin Web UI**：<https://aicenter.1.gay> / <https://ai-guard-admin.pages.dev>
 - **健康检查**：`GET /health` → 200
-- **当前 Worker 版本**：`d83482a2-25d2-4a45-9c2d-f56f848b0c64`（最近一次生产 deploy）
+- **当前 Worker 版本**：`372771b9-06bc-43d6-9bf3-344750448e43`（最近一次生产 deploy）
 - **D1 migrations**：`0001` 到 `0011` 已应用
 - **Analyze Queue**：`ai-guard-analyze` / `ai-guard-analyze-dlq` 已创建
 - **Analyze app**：`app_f2ce7d84dec8ad56` 已启用 `media_analysis` / `media_intro`，`delivery_mode=both`
@@ -147,6 +147,8 @@ curl -sS "$BASE/v1/moderate" \
 - analyze 灰度指标接口 `/admin/stats/analyze-gray`
 - analyze backlog 指标接口 `/admin/stats/analyze-backlog`
 - Provider 状态接口 `/admin/providers/status`
+- Analyze prompt dry-run：`media_intro` provider 干跑；`media_analysis` input schema + prompt preview
+- Admin UI app onboarding：创建/轮换 secret 后显示 IRC env、pull/ack 入口与 HMAC 签名格式
 
 后续生产变更流程：
 
