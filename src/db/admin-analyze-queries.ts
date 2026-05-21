@@ -119,10 +119,10 @@ export async function summarizeAnalyzeRequests(
     .prepare(
       `SELECT
          COUNT(*) AS count_total,
-         SUM(CASE WHEN cached = 1 THEN 1 ELSE 0 END) AS count_cached,
-         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS count_pending,
-         SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS count_ok,
-         SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS count_error,
+         COALESCE(SUM(CASE WHEN cached = 1 THEN 1 ELSE 0 END), 0) AS count_cached,
+         COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS count_pending,
+         COALESCE(SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END), 0) AS count_ok,
+         COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS count_error,
          COALESCE(SUM(input_tokens), 0) AS input_tokens,
          COALESCE(SUM(output_tokens), 0) AS output_tokens,
          COALESCE(SUM(LENGTH(COALESCE(result_json, ''))), 0) AS output_bytes_total
