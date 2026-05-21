@@ -11,6 +11,7 @@ import {
   updateAppFields,
   updateAppSecret,
 } from "../db/queries.ts";
+import { adminActorFromHeaders, logAdminAuditBestEffort } from "../db/admin-audit.ts";
 import { ANALYZE_BIZ_TYPES, DELIVERY_MODE } from "../analyze/schema/envelope.ts";
 import { BizType } from "../moderation/schema.ts";
 import type { AppConfig } from "../moderation/types.ts";
@@ -58,6 +59,22 @@ adminAppsRouter.post("/", async (c) => {
     provider_strategy: body.provider_strategy ?? "auto",
   };
   await insertApp(c.env.DB, app);
+  await logAdminAuditBestEffort(c.env.DB, {
+    actor: adminActorFromHeaders(c.req.raw.headers),
+    action: "app.create",
+    target_type: "app",
+    target_id: id,
+    metadata: {
+      name: app.name,
+      callback_configured: !!app.callback_url,
+      biz_types: app.biz_types,
+      analyze_biz_types: app.analyze_biz_types,
+      delivery_mode: app.delivery_mode,
+      callback_max_concurrency: app.callback_max_concurrency,
+      rate_limit_qps: app.rate_limit_qps,
+      provider_strategy: app.provider_strategy,
+    },
+  });
   return c.json(
     {
       id,
@@ -128,6 +145,7 @@ adminAppsRouter.patch("/:id", async (c) => {
   const existing = await getAppById(c.env.DB, id);
   if (!existing) throw new AppError(ErrorCodes.NOT_FOUND, 404, "app not found");
   const body = PatchAppSchema.parse(await c.req.json());
+  const changedFields = Object.keys(body);
   await updateAppFields(c.env.DB, id, {
     ...(body.name !== undefined ? { name: body.name } : {}),
     ...(body.callback_url !== undefined ? { callback_url: body.callback_url ?? null } : {}),
@@ -140,6 +158,23 @@ adminAppsRouter.patch("/:id", async (c) => {
     ...(body.provider_strategy !== undefined ? { provider_strategy: body.provider_strategy } : {}),
   });
   await invalidateAppCache(c.env, id);
+  await logAdminAuditBestEffort(c.env.DB, {
+    actor: adminActorFromHeaders(c.req.raw.headers),
+    action: "app.update",
+    target_type: "app",
+    target_id: id,
+    metadata: {
+      changed_fields: changedFields,
+      disabled: body.disabled,
+      delivery_mode: body.delivery_mode,
+      provider_strategy: body.provider_strategy,
+      biz_types: body.biz_types,
+      analyze_biz_types: body.analyze_biz_types,
+      callback_url_changed: body.callback_url !== undefined,
+      callback_max_concurrency: body.callback_max_concurrency,
+      rate_limit_qps: body.rate_limit_qps,
+    },
+  });
   return c.json({ ok: true });
 });
 
@@ -150,6 +185,13 @@ adminAppsRouter.post("/:id/rotate-secret", async (c) => {
   const secret = randomHex(32);
   await updateAppSecret(c.env.DB, id, secret);
   await invalidateAppCache(c.env, id);
+  await logAdminAuditBestEffort(c.env.DB, {
+    actor: adminActorFromHeaders(c.req.raw.headers),
+    action: "app.rotate_secret",
+    target_type: "app",
+    target_id: id,
+    metadata: { name: existing.name },
+  });
   return c.json({ id, secret });
 });
 

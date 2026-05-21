@@ -10,6 +10,7 @@ import AnalyzeOps from "./pages/AnalyzeOps";
 import Callbacks from "./pages/Callbacks";
 import AlertsPage from "./pages/Alerts";
 import Providers from "./pages/Providers";
+import AuditLogs from "./pages/AuditLogs";
 import { clearToken, getApiBase, getToken } from "./lib/api";
 
 export default function App() {
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/analyze-ops" element={<AnalyzeOps />} />
         <Route path="/callbacks" element={<Callbacks />} />
         <Route path="/providers" element={<Providers />} />
+        <Route path="/audit" element={<AuditLogs />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
@@ -73,6 +75,9 @@ function Layout({ children, onLogout }: { children: React.ReactNode; onLogout: (
         </NavLink>
         <NavLink className={({isActive}) => "nav-item" + (isActive ? " active" : "")} to="/providers">
           Provider 状态
+        </NavLink>
+        <NavLink className={({isActive}) => "nav-item" + (isActive ? " active" : "")} to="/audit">
+          审计日志
         </NavLink>
 
         <div className="nav-section">配置</div>

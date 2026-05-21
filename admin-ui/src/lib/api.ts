@@ -325,6 +325,16 @@ export interface ProviderHealthData {
   fired: string[];
 }
 
+export interface AuditLogRow {
+  id: number;
+  actor: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
 export const Apps = {
   list: () => api<{ items: AppConfig[] }>("/admin/apps"),
   get: (id: string) => api<AppConfig>(`/admin/apps/${id}`),
@@ -434,6 +444,21 @@ export const Alerts = {
 
 export const Providers = {
   status: () => api<ProviderStatusData>("/admin/providers/status"),
+};
+
+export const Audit = {
+  list: (q: {
+    actor?: string;
+    action?: string;
+    target_type?: string;
+    target_id?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    cursor?: number;
+  } = {}) => api<{ items: AuditLogRow[]; next_cursor: number | null }>(
+    `/admin/audit${qs(q)}`,
+  ),
 };
 
 function qs(o: Record<string, string | number | undefined>): string {

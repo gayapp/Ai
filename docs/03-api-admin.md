@@ -353,6 +353,47 @@ Authorization: Bearer <ADMIN_TOKEN>
 
 ---
 
+## Audit（管理动作审计）
+
+### `GET /admin/audit`
+
+**Query**：`?actor=&action=&target_type=&target_id=&from=&to=&limit=100&cursor=...`
+
+返回管理后台高影响动作审计日志。当前记录：
+
+- `app.create`
+- `app.update`
+- `app.rotate_secret`
+- `prompt.publish`
+- `prompt.rollback`
+
+审计日志不会记录 app secret 明文。
+
+**Response**
+
+```json
+{
+  "items": [
+    {
+      "id": 123,
+      "actor": "admin",
+      "action": "app.rotate_secret",
+      "target_type": "app",
+      "target_id": "app_xxx",
+      "metadata": {
+        "name": "IRC"
+      },
+      "created_at": "2026-05-22T00:00:00.000Z"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+`actor` 优先取 Cloudflare Access 的 `cf-access-authenticated-user-email`，其次取 `x-admin-actor`，否则为 `admin`。
+
+---
+
 ## Requests（历史查询）
 
 ### `GET /admin/requests`

@@ -107,13 +107,14 @@ detail 中重点字段：
 - Analyze backlog 统计：pending / pull_unacked / callback_undelivered 年龄桶。
 - App onboarding：创建或轮换 secret 后显示 IRC env、pull/ack 入口和 HMAC 签名格式。
 - Analyze prompt dry-run：`media_intro` provider 干跑；`media_analysis` input schema + prompt preview。
+- 审计日志：记录 app create/update/rotate-secret 与 prompt publish/rollback。
 
 ### P1 建议下一轮
 
 | 项 | 价值 | 验收 |
 | --- | --- | --- |
-| 审计日志 | 记录 app secret rotation、prompt publish、disable app 等管理动作 | D1 新表 + Admin UI 列表 |
 | Analyze prompt regression set | Prompt 发布前批量跑固定样本集 | 支持保存样本集、对比 active vs draft |
+| 审计导出与告警 | 方便安全审查和异常操作追踪 | 支持 CSV 导出、可选 Telegram 通知 rotate-secret / prompt rollback |
 
 ### P2 后续增强
 

@@ -25,6 +25,7 @@
 | `/analyze-records` | analyze 长留存记录：按 app / biz / status / delivery / biz_id / 时间窗过滤 |
 | `/callbacks` | callback 投递记录：支持只看失败或未投递 |
 | `/providers` | Provider 状态：模型配置、secret 配置状态、KV 熔断状态、手动 health check |
+| `/audit` | 审计日志：app / prompt 高影响管理动作 |
 | `/apps` | app 管理：新建、编辑、禁用、轮换 secret，支持 `IRC analyze` 预设 |
 | `/prompts` | prompt 管理：moderate / analyze prompt 版本、发布、回滚 |
 | `/alerts` | Telegram 告警测试、阈值检查、provider health 手动检查 |
@@ -130,6 +131,20 @@
 - HMAC 签名格式。
 
 `Copy IRC env` 会复制完整 env 片段，适合 IRC 新建独立 app 后直接交接到安全配置。
+
+## 审计日志
+
+路径：`/audit`
+
+记录以下动作：
+
+- 创建 app
+- 修改 app
+- 轮换 app secret
+- 发布 prompt
+- 回滚 prompt
+
+支持按时间窗、action、target type、target id、actor 过滤。审计 metadata 不包含 app secret 明文。
 
 ## 告警
 

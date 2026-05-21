@@ -8,6 +8,7 @@ import {
   publishPrompt,
   rollbackPrompt,
 } from "../db/queries.ts";
+import { adminActorFromHeaders, logAdminAuditBestEffort } from "../db/admin-audit.ts";
 import { ANALYZE_BIZ_TYPES } from "../analyze/schema/envelope.ts";
 import { buildMediaAnalysisPrompt } from "../analyze/pipeline/media-analysis.ts";
 import { buildMediaIntroPrompt } from "../analyze/pipeline/media-intro.ts";
@@ -68,6 +69,19 @@ adminPromptsRouter.post("/", async (c) => {
     body.created_by ?? "admin",
   );
   await invalidatePromptCache(c.env, body.biz_type, body.provider);
+  await logAdminAuditBestEffort(c.env.DB, {
+    actor: adminActorFromHeaders(c.req.raw.headers),
+    action: "prompt.publish",
+    target_type: "prompt",
+    target_id: String(row.id),
+    metadata: {
+      biz_type: row.biz_type,
+      provider: row.provider,
+      version: row.version,
+      content_length: body.content.length,
+      created_by: body.created_by ?? "admin",
+    },
+  });
   return c.json({
     id: row.id,
     biz_type: row.biz_type,
@@ -86,6 +100,17 @@ adminPromptsRouter.post("/:id/rollback", async (c) => {
   if (!row) throw new AppError(ErrorCodes.NOT_FOUND, 404, "prompt not found");
   assertPromptRoute(row.biz_type, row.provider);
   await invalidatePromptCache(c.env, row.biz_type, row.provider);
+  await logAdminAuditBestEffort(c.env.DB, {
+    actor: adminActorFromHeaders(c.req.raw.headers),
+    action: "prompt.rollback",
+    target_type: "prompt",
+    target_id: String(row.id),
+    metadata: {
+      biz_type: row.biz_type,
+      provider: row.provider,
+      version: row.version,
+    },
+  });
   return c.json({
     id: row.id,
     biz_type: row.biz_type,

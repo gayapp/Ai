@@ -6,6 +6,7 @@ import { checkProviderHealth } from "./alerts/provider-health.ts";
 import { moderateRouter } from "./routes/moderate.ts";
 import { analyzeRouter } from "./routes/analyze.ts";
 import { analyzeRecordsRouter } from "./routes/analyze-records.ts";
+import { adminAuditRouter } from "./routes/admin-audit.ts";
 import { adminAppsRouter } from "./routes/admin-apps.ts";
 import { adminAnalyzeRecordsRouter } from "./routes/admin-analyze-records.ts";
 import { adminPromptsRouter } from "./routes/admin-prompts.ts";
@@ -81,6 +82,7 @@ app.get("/architecture", (c) =>
 app.route("/", moderateRouter);
 app.route("/", analyzeRouter);
 app.route("/", analyzeRecordsRouter);
+app.route("/admin/audit", adminAuditRouter);
 app.route("/admin/apps", adminAppsRouter);
 app.route("/admin/analyze-records", adminAnalyzeRecordsRouter);
 app.route("/admin/prompts", adminPromptsRouter);
