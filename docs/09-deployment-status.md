@@ -7,12 +7,12 @@
 - **Prod API**：<https://aicenter-api.1.gay> / <https://ai-guard.schetkovvlad.workers.dev>
 - **Admin Web UI**：<https://aicenter.1.gay> / <https://ai-guard-admin.pages.dev>
 - **健康检查**：`GET /health` → 200
-- **当前 Worker 版本**：`1ef078f3-7434-43d2-8247-dfd8e7113c69`（最近一次生产 deploy）
+- **当前 Worker 版本**：`d83482a2-25d2-4a45-9c2d-f56f848b0c64`（最近一次生产 deploy）
 - **D1 migrations**：`0001` 到 `0011` 已应用
 - **Analyze Queue**：`ai-guard-analyze` / `ai-guard-analyze-dlq` 已创建
 - **Analyze app**：`app_f2ce7d84dec8ad56` 已启用 `media_analysis` / `media_intro`，`delivery_mode=both`
 - **Smoke**：`media_intro` 与 `media_analysis` 已验证 `POST /v1/analyze` → pull → ack
-- **监控**：Telegram 测试告警可发送；`/admin/alerts/check`、`/admin/stats/analyze-gray` 可用
+- **监控**：Telegram 测试告警可发送；`/admin/alerts/check`、`/admin/stats/analyze-gray`、`/admin/stats/analyze-backlog`、`/admin/providers/status` 可用
 - **Provider**：xAI 正常；Gemini secret 已刷新，若 health 返回 `429`，按 Gemini 配额/限流处理
 
 ## Worker
@@ -145,6 +145,8 @@ curl -sS "$BASE/v1/moderate" \
 - analyze callback schema `1.1`
 - Admin UI analyze dashboard、灰度页与调用记录页
 - analyze 灰度指标接口 `/admin/stats/analyze-gray`
+- analyze backlog 指标接口 `/admin/stats/analyze-backlog`
+- Provider 状态接口 `/admin/providers/status`
 
 后续生产变更流程：
 
