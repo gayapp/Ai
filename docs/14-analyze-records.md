@@ -183,6 +183,8 @@ callback_max_concurrency: 10                             # 按消费方承载调
 rate_limit_qps:          500                             # 按业务流量协商
 ```
 
+生产现状（2026-05-22）：当前已在 `app_f2ce7d84dec8ad56` 启用 `media_analysis` / `media_intro`，供 IRC 灰度接入验证。若需要与“一起看”正式应用隔离，可另行创建独立 `app_irc`。
+
 消费方在自己的密钥管理中存 secret（IRC 走 `secrets-hub`），key 名建议 `ai_guard_secret`。
 
 ### 5.2 在线场景（采集端实时入库）

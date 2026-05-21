@@ -1,6 +1,19 @@
-# 09 · 部署状态 · dev 环境
+# 09 · 部署状态
 
-> 最后更新：2026-04-23（由本次自动部署生成）
+> 最后更新：2026-05-22。生产 analyze 线已部署，IRC 接入交接见 [apps/IRC-analyze-handoff.md](apps/IRC-analyze-handoff.md)。
+
+## 生产状态（prod）
+
+- **Prod API**：<https://aicenter-api.1.gay> / <https://ai-guard.schetkovvlad.workers.dev>
+- **Admin Web UI**：<https://ai-guard-admin.pages.dev>
+- **健康检查**：`GET /health` → 200
+- **当前 Worker 版本**：`1ef078f3-7434-43d2-8247-dfd8e7113c69`（最近一次生产 deploy）
+- **D1 migrations**：`0001` 到 `0011` 已应用
+- **Analyze Queue**：`ai-guard-analyze` / `ai-guard-analyze-dlq` 已创建
+- **Analyze app**：`app_f2ce7d84dec8ad56` 已启用 `media_analysis` / `media_intro`，`delivery_mode=both`
+- **Smoke**：`media_intro` 与 `media_analysis` 已验证 `POST /v1/analyze` → pull → ack
+- **监控**：Telegram 测试告警可发送；`/admin/alerts/check`、`/admin/stats/analyze-gray` 可用
+- **Provider**：xAI 正常；Gemini secret 已刷新，若 health 返回 `429`，按 Gemini 配额/限流处理
 
 ## Worker
 
@@ -120,14 +133,29 @@ curl -sS "$BASE/v1/moderate" \
 
 替换占位 Grok/Gemini key 后应返回 `{"request_id":"...","cached":false,"result":{"status":"pass",...}}`。
 
-## 生产（prod）尚未部署
+## 生产发布记录（2026-05-22）
 
-一期先只部署了 dev。部署 prod 走：
+生产已经部署完成。本次发布包含：
+
+- `/v1/analyze` 提交接口与 pull 三接口
+- `media_analysis` / `media_intro`
+- `analyze_requests` 长留存表
+- analyze callback schema `1.1`
+- Admin UI analyze tab 与调用记录页
+- analyze 灰度指标接口 `/admin/stats/analyze-gray`
+
+后续生产变更流程：
 
 ```bash
-bash scripts/bootstrap-cf.sh prod
-wrangler secret put GROK_API_KEY
-wrangler secret put GEMINI_API_KEY
-wrangler secret put ADMIN_TOKEN
-pnpm deploy
+pnpm -s typecheck && pnpm -s test
+wrangler d1 migrations apply ai-guard --remote
+wrangler deploy --env=""
+```
+
+Admin UI 如有变更：
+
+```bash
+cd admin-ui
+pnpm -s build
+wrangler pages deploy dist --project-name ai-guard-admin --branch main
 ```

@@ -5,10 +5,21 @@
 ## 前置条件
 
 - T-001 至 T-007 已合并并部署到 dev。
-- `app_irc` 已在 ai-guard Admin UI 启用 `media_analysis` / `media_intro`。
-- `app_irc.delivery_mode` 建议为 `both`；批量回填可在单条请求上覆盖为 `pull`。
+- 生产已部署 analyze 线。IRC 接入交接见 [apps/IRC-analyze-handoff.md](apps/IRC-analyze-handoff.md)。
+- 当前生产已在 `app_f2ce7d84dec8ad56` 启用 `media_analysis` / `media_intro`，`delivery_mode=both`。
+- 如需独立隔离，可新建 `app_irc` 并启用同样配置。
 - IRC 侧具备 `AI_BACKEND=internal|ai_guard` 回滚开关。
-- production 部署和 production 灰度必须等用户授权；不得私自执行 `wrangler deploy --env production`。
+- production 部署已由用户授权完成。后续 production 变更仍需明确授权。
+
+## 生产状态（2026-05-22）
+
+- Worker：`https://aicenter-api.1.gay`，`GET /health` 通过。
+- Admin UI：`https://ai-guard-admin.pages.dev` 可访问。
+- D1：`0006` 到 `0011` 已应用。
+- Queue：`ai-guard-analyze` / `ai-guard-analyze-dlq` 已创建。
+- Smoke：`media_intro` 与 `media_analysis` 均已 `ok`，pull + ack 已验证。
+- 监控：Telegram 测试告警可发送；`/admin/stats/analyze-gray` 可查询。
+- Provider：xAI 正常；Gemini secret 已刷新，但最近 provider health 仍可能返回 `http 429`，按配额/限流问题处理。
 
 ## Dev 冒烟
 

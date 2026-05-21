@@ -7,6 +7,7 @@
 > 经与 IRC 项目方对齐，**方向调整为**：ai-guard 从"UGC 审核中转"扩展为"AI 内容服务中转"，新增"内容生成 / 分析"业务线（视频帧 / 图片 / 简介生成等）；IRC 主流 AI 调用以独立 biz_type 接入新业务线，而不是套用现有审核 schema。
 >
 > 新方向的正式规划见 [optimization/content-services-expansion.md](../optimization/content-services-expansion.md)（RFC）。
+> 生产接入交接与 IRC 端实施口径见 [IRC-analyze-handoff.md](IRC-analyze-handoff.md)。
 >
 > 本文降级为**输入素材**：保留 IRC 五条 AI 链路的盘点（§2）、文件清单（§8.1）和文本审核线的接入路径（§4.1 / §5）作为新方向 P1 阶段的子集；§3 的兼容性矩阵不再适用（其前提"ai-guard 输出 schema 不变"已被推翻）。
 >
