@@ -25,6 +25,7 @@
 | 内容服务总览 | [docs/12-content-service.md](docs/12-content-service.md) |
 | Analyze 回调契约 | [docs/13-callback-spec-analyze.md](docs/13-callback-spec-analyze.md) |
 | Analyze pull / 调用记录 | [docs/14-analyze-records.md](docs/14-analyze-records.md) |
+| Analyze 灰度 Runbook | [docs/15-analyze-gray-runbook.md](docs/15-analyze-gray-runbook.md) |
 
 ## 支持的业务类型
 

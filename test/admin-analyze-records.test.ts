@@ -6,10 +6,14 @@ import { AppError, ErrorCodes } from "../src/lib/errors.ts";
 import type { AnalyzeRow } from "../src/analyze/types.ts";
 
 class FakeD1 {
-  readonly rows: AnalyzeRow[] = [
-    makeRow("r002", "media_intro", "video-2", "error", null),
-    makeRow("r001", "media_analysis", "video-1", "ok", { summary: "done" }),
-  ];
+  readonly rows: AnalyzeRow[];
+
+  constructor(rows?: AnalyzeRow[]) {
+    this.rows = rows ?? [
+      makeRow("r002", "media_intro", "video-2", "error", null),
+      makeRow("r001", "media_analysis", "video-1", "ok", { summary: "done" }),
+    ];
+  }
   prepare(sql: string): FakeStmt {
     return new FakeStmt(this, sql);
   }
@@ -93,6 +97,66 @@ describe("admin analyze records", () => {
     expect(body.by_status).toEqual({ pending: 0, ok: 1, error: 1 });
     expect(body.output_bytes_total).toBeGreaterThan(0);
   });
+
+  it("reports analyze gray readiness gates and distributions", async () => {
+    const now = Date.now();
+    const rows = [
+      makeRow("r004", "media_analysis", "video-4", "ok", { summary: "done" }, {
+        cached: 1,
+        latency_ms: 200,
+        output_tokens: 90,
+        delivered_at: now,
+        acked_at: now,
+        created_at: now - 4000,
+      }),
+      makeRow("r003", "media_intro", "video-3", "ok", { intro: "ready" }, {
+        cached: 1,
+        latency_ms: 160,
+        output_tokens: 80,
+        delivered_at: now,
+        acked_at: now,
+        created_at: now - 3000,
+      }),
+      makeRow("r002", "media_analysis", "video-2", "ok", { summary: "done" }, {
+        latency_ms: 120,
+        output_tokens: 60,
+        delivered_at: now,
+        acked_at: now,
+        created_at: now - 2000,
+      }),
+      makeRow("r001", "media_analysis", "video-1", "ok", { summary: "done" }, {
+        latency_ms: 100,
+        output_tokens: 40,
+        delivered_at: now,
+        acked_at: now,
+        created_at: now - 1000,
+      }),
+    ];
+    const app = makeApp();
+    const env = makeEnv(rows);
+    const res = await app.fetch(new Request("http://local/admin/stats/analyze-gray?baseline_p95_ms=140&limit=10", {
+      headers: adminHeaders(),
+    }), env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      sample_size: number;
+      ready_for_next_stage: boolean;
+      gates: Record<string, boolean>;
+      status: { by_status: { pending: number; ok: number; error: number } };
+      latency_ms: { p95: number };
+      tokens: { output: { p95: number } };
+      dedup: { hit_rate: number };
+      by_biz_type: Record<string, number>;
+    };
+    expect(body.sample_size).toBe(4);
+    expect(body.ready_for_next_stage).toBe(true);
+    expect(body.gates.error_rate_under_1_percent).toBe(true);
+    expect(body.status.by_status).toEqual({ pending: 0, ok: 4, error: 0 });
+    expect(body.latency_ms.p95).toBe(200);
+    expect(body.tokens.output.p95).toBe(90);
+    expect(body.dedup.hit_rate).toBe(0.5);
+    expect(body.by_biz_type).toEqual({ media_analysis: 3, media_intro: 1 });
+  });
 });
 
 function makeApp(): Hono<{ Bindings: Env }> {
@@ -106,9 +170,9 @@ function makeApp(): Hono<{ Bindings: Env }> {
   return app;
 }
 
-function makeEnv(): Env {
+function makeEnv(rows?: AnalyzeRow[]): Env {
   return {
-    DB: new FakeD1(),
+    DB: new FakeD1(rows),
     ADMIN_TOKEN: "admin-token",
   } as unknown as Env;
 }
@@ -123,6 +187,7 @@ function makeRow(
   bizId: string,
   status: string,
   result: Record<string, unknown> | null,
+  overrides: Partial<AnalyzeRow> = {},
 ): AnalyzeRow {
   return {
     id,
@@ -150,5 +215,6 @@ function makeRow(
     acked_at: null,
     created_at: Date.now(),
     completed_at: Date.now(),
+    ...overrides,
   };
 }

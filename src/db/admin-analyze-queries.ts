@@ -23,6 +23,24 @@ export interface AnalyzeSummaryRow {
   output_bytes_total: number;
 }
 
+export type AnalyzeGrayMetricRow = Pick<
+  AnalyzeRow,
+  | "id"
+  | "app_id"
+  | "biz_type"
+  | "status"
+  | "cached"
+  | "input_tokens"
+  | "output_tokens"
+  | "latency_ms"
+  | "error_code"
+  | "delivery_mode"
+  | "delivered_at"
+  | "acked_at"
+  | "created_at"
+  | "completed_at"
+>;
+
 export async function listAdminAnalyzeRequests(
   db: D1Database,
   opts: ListAdminAnalyzeArgs,
@@ -123,4 +141,33 @@ export async function summarizeAnalyzeRequests(
     output_tokens: 0,
     output_bytes_total: 0,
   };
+}
+
+export async function loadAnalyzeGrayMetricRows(
+  db: D1Database,
+  opts: { app_id?: string; from_ms: number; to_ms: number; limit?: number },
+): Promise<AnalyzeGrayMetricRow[]> {
+  const where: string[] = ["created_at >= ?", "created_at <= ?"];
+  const vals: unknown[] = [opts.from_ms, opts.to_ms];
+  if (opts.app_id) {
+    where.push("app_id = ?");
+    vals.push(opts.app_id);
+  }
+
+  const limit = Math.min(Math.max(opts.limit ?? 10000, 1), 50000);
+  vals.push(limit);
+  const { results } = await db
+    .prepare(
+      `SELECT
+         id, app_id, biz_type, status, cached, input_tokens, output_tokens,
+         latency_ms, error_code, delivery_mode, delivered_at, acked_at,
+         created_at, completed_at
+       FROM analyze_requests
+       WHERE ${where.join(" AND ")}
+       ORDER BY created_at DESC
+       LIMIT ?`,
+    )
+    .bind(...vals)
+    .all<AnalyzeGrayMetricRow>();
+  return results;
 }

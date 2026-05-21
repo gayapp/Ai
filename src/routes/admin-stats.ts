@@ -8,7 +8,11 @@ import {
   summarize,
   topUsers,
 } from "../db/queries.ts";
-import { summarizeAnalyzeRequests } from "../db/admin-analyze-queries.ts";
+import {
+  loadAnalyzeGrayMetricRows,
+  summarizeAnalyzeRequests,
+  type AnalyzeGrayMetricRow,
+} from "../db/admin-analyze-queries.ts";
 import { BizType, Status } from "../moderation/schema.ts";
 import { executeModeration } from "../moderation/pipeline.ts";
 import { readEvidence } from "../evidence/r2.ts";
@@ -93,6 +97,92 @@ adminStatsRouter.get("/analyze-summary", async (c) => {
       output: row.output_tokens,
     },
     output_bytes_total: row.output_bytes_total,
+  });
+});
+
+adminStatsRouter.get("/analyze-gray", async (c) => {
+  const { from_ms, to_ms } = resolveRange(c);
+  const app_id = c.req.query("app_id") ?? undefined;
+  const limit = clampInt(c.req.query("limit"), 10000, 1, 50000);
+  const baselineP95Ms = finitePositive(c.req.query("baseline_p95_ms"));
+  const rows = await loadAnalyzeGrayMetricRows(c.env.DB, { app_id, from_ms, to_ms, limit });
+  const total = rows.length;
+  const byStatus = countBy(rows, (r) => r.status || "unknown");
+  const byBizType = countBy(rows, (r) => r.biz_type || "unknown");
+  const cached = rows.filter((r) => r.cached === 1).length;
+  const latency = percentiles(rows.map((r) => numberOrNull(r.latency_ms)));
+  const outputTokens = percentiles(rows.map((r) => numberOrNull(r.output_tokens)));
+  const inputTokens = percentiles(rows.map((r) => numberOrNull(r.input_tokens)));
+  const completed = rows.filter((r) => r.status === "ok" || r.status === "error");
+  const stalePendingCutoff = Date.now() - 5 * 60 * 1000;
+  const stalePending = rows.filter(
+    (r) => r.status === "pending" && r.created_at < stalePendingCutoff,
+  ).length;
+  const callbackUndelivered = completed.filter(
+    (r) => (r.delivery_mode === "callback" || r.delivery_mode === "both") && !r.delivered_at,
+  ).length;
+  const pullUnacked = completed.filter(
+    (r) => (r.delivery_mode === "pull" || r.delivery_mode === "both") && !r.acked_at,
+  ).length;
+  const errorCodes = countBy(
+    rows.filter((r) => r.status === "error"),
+    (r) => r.error_code || "unknown",
+  );
+
+  const errorRate = total ? round4((byStatus.error ?? 0) / total) : 0;
+  const dedupHitRate = total ? round4(cached / total) : 0;
+  const latencyRatio = baselineP95Ms && latency.p95 !== null
+    ? round4(latency.p95 / baselineP95Ms)
+    : null;
+  const gates = {
+    has_samples: total > 0,
+    error_rate_under_1_percent: total > 0 && errorRate < 0.01,
+    no_pending_older_than_5m: stalePending === 0,
+    dedup_hit_rate_at_least_30_percent: total > 0 && dedupHitRate >= 0.3,
+    latency_within_1_5x_baseline: baselineP95Ms && latency.p95 !== null
+      ? latency.p95 <= baselineP95Ms * 1.5
+      : false,
+  };
+
+  return c.json({
+    from: new Date(from_ms).toISOString(),
+    to: new Date(to_ms).toISOString(),
+    app_id: app_id ?? null,
+    sample_limit: limit,
+    sample_size: total,
+    ready_for_next_stage: Object.values(gates).every(Boolean),
+    gates,
+    status: {
+      by_status: {
+        pending: byStatus.pending ?? 0,
+        ok: byStatus.ok ?? 0,
+        error: byStatus.error ?? 0,
+      },
+      error_rate: errorRate,
+      ok_rate: total ? round4((byStatus.ok ?? 0) / total) : 0,
+      pending_older_than_5m: stalePending,
+    },
+    latency_ms: latency,
+    tokens: {
+      input: inputTokens,
+      output: outputTokens,
+    },
+    baseline: {
+      internal_p95_ms: baselineP95Ms,
+      p95_ratio: latencyRatio,
+      max_allowed_p95_ms: baselineP95Ms ? Math.round(baselineP95Ms * 1.5) : null,
+    },
+    dedup: {
+      cached,
+      hit_rate: dedupHitRate,
+      expected_min_hit_rate: 0.3,
+    },
+    delivery: {
+      callback_undelivered: callbackUndelivered,
+      pull_unacked: pullUnacked,
+    },
+    error_codes: errorCodes,
+    by_biz_type: byBizType,
   });
 });
 
@@ -260,3 +350,60 @@ adminStatsRouter.get("/top-users", async (c) => {
   const items = await topUsers(c.env.DB, { app_id, from_ms, to_ms, limit });
   return c.json({ items });
 });
+
+function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = raw ? parseInt(raw, 10) : fallback;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+}
+
+function finitePositive(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function numberOrNull(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function percentiles(values: Array<number | null>): {
+  count: number;
+  p50: number | null;
+  p95: number | null;
+  p99: number | null;
+  max: number | null;
+} {
+  const sorted = values
+    .filter((value): value is number => value !== null)
+    .sort((a, b) => a - b);
+  return {
+    count: sorted.length,
+    p50: percentile(sorted, 0.5),
+    p95: percentile(sorted, 0.95),
+    p99: percentile(sorted, 0.99),
+    max: sorted.length ? sorted[sorted.length - 1] : null,
+  };
+}
+
+function percentile(sortedValues: number[], p: number): number | null {
+  if (sortedValues.length === 0) return null;
+  const idx = Math.min(sortedValues.length - 1, Math.max(0, Math.ceil(sortedValues.length * p) - 1));
+  return sortedValues[idx] ?? null;
+}
+
+function countBy(
+  rows: AnalyzeGrayMetricRow[],
+  pick: (row: AnalyzeGrayMetricRow) => string,
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    const key = pick(row);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function round4(value: number): number {
+  return +value.toFixed(4);
+}

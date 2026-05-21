@@ -96,6 +96,7 @@ analyze 线额外支持 `delivery_mode ∈ {callback, pull, both}`，默认 `bot
 - 内容服务 → [12-content-service.md](12-content-service.md)
 - Analyze 回调 → [13-callback-spec-analyze.md](13-callback-spec-analyze.md)
 - Analyze 调用记录 / pull → [14-analyze-records.md](14-analyze-records.md)
+- Analyze 灰度 → [15-analyze-gray-runbook.md](15-analyze-gray-runbook.md)
 - Admin Web UI → [10-admin-ui.md](10-admin-ui.md)
 - 告警 → [11-alerts.md](11-alerts.md)
 - 已接入的应用 → [apps/](apps/)
