@@ -99,5 +99,6 @@ analyze 线额外支持 `delivery_mode ∈ {callback, pull, both}`，默认 `bot
 - Analyze 灰度 → [15-analyze-gray-runbook.md](15-analyze-gray-runbook.md)
 - IRC Analyze 接入交接 → [apps/IRC-analyze-handoff.md](apps/IRC-analyze-handoff.md)
 - Admin Web UI → [10-admin-ui.md](10-admin-ui.md)
+- Admin Console 全面规划 → [16-admin-console-roadmap.md](16-admin-console-roadmap.md)
 - 告警 → [11-alerts.md](11-alerts.md)
 - 已接入的应用 → [apps/](apps/)

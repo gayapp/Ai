@@ -10,7 +10,7 @@ ai-guard 生产环境已可用于 IRC 侧灰度：
 | 项 | 状态 |
 | --- | --- |
 | Worker | 已部署，`https://aicenter-api.1.gay` |
-| Admin UI | 已部署，`https://ai-guard-admin.pages.dev` |
+| Admin UI | 已部署，`https://aicenter.1.gay` / `https://ai-guard-admin.pages.dev` |
 | D1 migrations | `0006` 到 `0011` 已应用 |
 | Queue | `ai-guard-analyze` / `ai-guard-analyze-dlq` 已创建 |
 | Analyze app config | 已启用 `media_analysis` / `media_intro` |
@@ -27,7 +27,7 @@ analyze_biz_types: ["media_analysis", "media_intro"]
 delivery_mode: both
 ```
 
-如果 IRC 需要与“一起看”正式应用隔离，应在 ai-guard 新建独立 `app_irc`，再把 `AI_GUARD_APP_ID` / secret 切到新 app。
+如果 IRC 需要与“一起看”正式应用隔离，应在 Admin UI `/apps` 新建独立 app：点击 `New app` 后使用 `IRC analyze` 预设，再把 `AI_GUARD_APP_ID` / secret 切到新 app。
 
 ## IRC 侧建议配置
 
@@ -121,6 +121,8 @@ BASELINE_P95_MS=<IRC internal p95> \
 WINDOW_HOURS=24 \
 node scripts/analyze-gray-report.mjs --assert
 ```
+
+也可以在管理后台直接查看：<https://aicenter.1.gay/#/analyze-ops>。选择 IRC app、填入 IRC 原方案 `baseline p95 ms`，`Ready=YES` 且所有 gate 通过后再升档。
 
 注意：2026-05-21 的 24h 窗口包含多条生产 smoke 失败样本。正式灰度请以实际开始时间作为 `from`，不要用被 smoke 污染的 24h 默认窗口做升档判断。
 

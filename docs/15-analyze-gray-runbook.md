@@ -14,7 +14,7 @@
 ## 生产状态（2026-05-22）
 
 - Worker：`https://aicenter-api.1.gay`，`GET /health` 通过。
-- Admin UI：`https://ai-guard-admin.pages.dev` 可访问。
+- Admin UI：`https://aicenter.1.gay` / `https://ai-guard-admin.pages.dev` 可访问，灰度页为 `#/analyze-ops`。
 - D1：`0006` 到 `0011` 已应用。
 - Queue：`ai-guard-analyze` / `ai-guard-analyze-dlq` 已创建。
 - Smoke：`media_intro` 与 `media_analysis` 均已 `ok`，pull + ack 已验证。
@@ -75,6 +75,8 @@ EXPECT_STATUS=ok node scripts/analyze-smoke.mjs
 任一阶段出现重大问题，停档，IRC 侧切回 `AI_BACKEND=internal`，修复后重新从 10% 开始。
 
 ## 指标与升档 Gate
+
+推荐先用 Admin UI 查看：<https://aicenter.1.gay/#/analyze-ops>。选择 IRC app，填入 IRC 原内部方案的 `baseline p95 ms`，页面会展示 `Ready`、各 gate、错误分布、延迟分位、pull/callback 积压，并可跳转到 analyze 记录页排查。
 
 ai-guard 提供管理接口：
 

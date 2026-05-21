@@ -22,6 +22,9 @@ Authorization: Bearer <ADMIN_TOKEN>
   "name": "my-forum",
   "callback_url": "https://myapp.com/hooks/moderate",
   "biz_types": ["comment", "nickname", "bio"],
+  "analyze_biz_types": [],
+  "delivery_mode": "both",
+  "callback_max_concurrency": 10,
   "rate_limit_qps": 100,
   "provider_strategy": "auto"
 }
@@ -29,14 +32,24 @@ Authorization: Bearer <ADMIN_TOKEN>
 
 ### `provider_strategy` 取值
 
-| 值 | 文本类走哪家 | 头像 | 说明 |
-|----|-------------|------|------|
-| `auto`（默认） | Grok | Gemini | 平台默认路由 |
-| `grok` | Grok | Gemini | 即使熔断也先尝试 Grok；失败走 Gemini 备份 |
-| `gemini` | Gemini | Gemini | 所有审核都用 Gemini；文本失败备 Grok |
-| `round_robin` | 每秒切换 | Gemini | 基于 `Date.now()/1000 % 2` 决定本次主 |
+| 值 | moderate 文本 | moderate 头像 | analyze | 说明 |
+|----|-------------|------|------|------|
+| `auto`（默认） | Grok | Gemini | 按 analyze 路由选择 xAI / Gemini | 平台默认路由 |
+| `grok` | Grok | Gemini | analyze 不使用 Grok，按默认 analyze 路由降级 | moderate 文本优先 Grok |
+| `gemini` | Gemini | Gemini | Gemini 优先，失败按 analyze fallback | 所有可用场景尽量优先 Gemini |
+| `round_robin` | 每秒切换 | Gemini | xAI / Gemini 轮换 | 基于 `Date.now()/1000 % 2` 决定本次主 |
 
-> 说明：头像（avatar）因 Grok 无 Vision 能力，无论策略是什么都走 Gemini。策略只影响文本三类。
+> 说明：头像（avatar）因 Grok 无 Vision 能力，无论策略是什么都走 Gemini。analyze 线 provider 取值是 `xai` / `gemini`。
+
+### `delivery_mode` 取值
+
+仅 analyze 线使用：
+
+| 值 | 行为 |
+| --- | --- |
+| `callback` | 完成后只投递 callback |
+| `pull` | 完成后只等待接入方 pull |
+| `both`（默认） | callback + pull 兜底，IRC 推荐 |
 
 **Response 201**
 ```json
@@ -46,7 +59,11 @@ Authorization: Bearer <ADMIN_TOKEN>
   "secret": "only-shown-once-please-save-it",
   "callback_url": "https://myapp.com/hooks/moderate",
   "biz_types": ["comment", "nickname", "bio"],
+  "analyze_biz_types": [],
+  "delivery_mode": "both",
+  "callback_max_concurrency": 10,
   "rate_limit_qps": 100,
+  "provider_strategy": "auto",
   "created_at": "2026-04-23T08:00:00Z"
 }
 ```
@@ -60,7 +77,17 @@ Authorization: Bearer <ADMIN_TOKEN>
 ### `GET /admin/apps/{id}`
 
 ### `PATCH /admin/apps/{id}`
-可更新：`name` / `callback_url` / `biz_types` / `rate_limit_qps` / `disabled`。
+可更新：
+
+- `name`
+- `callback_url`
+- `biz_types`
+- `analyze_biz_types`
+- `delivery_mode`
+- `callback_max_concurrency`
+- `rate_limit_qps`
+- `disabled`
+- `provider_strategy`
 
 ### `POST /admin/apps/{id}/rotate-secret` — 轮换密钥
 
@@ -129,6 +156,51 @@ Authorization: Bearer <ADMIN_TOKEN>
 }
 ```
 
+### `GET /admin/stats/analyze-summary`
+
+**Query**：`?from=2026-05-21T00:00:00Z&to=2026-05-22T00:00:00Z&app_id=app_xxx`
+
+返回 analyze 线汇总：
+
+```json
+{
+  "total": 100,
+  "cached": 35,
+  "cache_hit_rate": 0.35,
+  "by_status": { "pending": 0, "ok": 98, "error": 2 },
+  "ok_rate": 0.98,
+  "tokens": { "input": 12345, "output": 6789 },
+  "output_bytes_total": 456789
+}
+```
+
+### `GET /admin/stats/analyze-gray`
+
+**Query**：`?from=&to=&app_id=&baseline_p95_ms=15000&limit=10000`
+
+用于 IRC / analyze 灰度升档门禁。
+
+```json
+{
+  "sample_size": 1000,
+  "ready_for_next_stage": true,
+  "gates": {
+    "has_samples": true,
+    "error_rate_under_1_percent": true,
+    "no_pending_older_than_5m": true,
+    "dedup_hit_rate_at_least_30_percent": true,
+    "latency_within_1_5x_baseline": true
+  },
+  "status": {
+    "by_status": { "pending": 0, "ok": 998, "error": 2 },
+    "error_rate": 0.002,
+    "ok_rate": 0.998,
+    "pending_older_than_5m": 0
+  },
+  "delivery": { "callback_undelivered": 0, "pull_unacked": 0 }
+}
+```
+
 ### `GET /admin/stats/top-users?app_id=...&limit=20`
 被拒最多的用户（反滥用）。
 
@@ -145,6 +217,50 @@ Authorization: Bearer <ADMIN_TOKEN>
 ### `GET /admin/stats/callbacks?failed=1&limit=50` — 回调投递记录
 
 每次 webhook 投递的尝试结果（HTTP 状态、重试次数、最后错误、下次重试时间）。`failed=1` 只看未投递成功的。
+
+---
+
+## Analyze Records（内容服务记录）
+
+### `GET /admin/analyze-records`
+
+**Query**：`?app_id=&biz_type=&biz_id=&status=&delivery_mode=&from=&to=&limit=100&cursor=...`
+
+返回 analyze 长留存记录摘要。`limit` ≤ 500。
+
+每条包含：
+
+- `request_id`
+- `app_id`
+- `biz_type`
+- `biz_id`
+- `user_id`
+- `mode`
+- `status`
+- `provider`
+- `model`
+- `cached`
+- `tokens`
+- `latency_ms`
+- `error_code`
+- `delivery_mode`
+- `delivered_at`
+- `acked_at`
+- `created_at`
+- `completed_at`
+
+### `GET /admin/analyze-records/{request_id}`
+
+返回单条完整详情，包含：
+
+- `input`
+- `result`
+- `extra`
+- `input_hash`
+- `prompt_version`
+- `callback_url`
+
+用于 IRC 按 `request_id` 或 `biz_id` 对账。完整接入方 pull 契约见 [14-analyze-records.md](14-analyze-records.md)。
 
 ---
 
@@ -184,6 +300,10 @@ Authorization: Bearer <ADMIN_TOKEN>
 ```
 
 阈值在 `src/alerts/telegram.ts` 的 `DEFAULT_THRESHOLDS` 中定义，改完重新部署生效。
+
+### `POST /admin/alerts/provider-health`
+
+立即执行一次 provider health 检查。生产 Cron 每小时自动跑一次；这个接口用于手动确认 Grok / Gemini / xAI 是否正常、是否触发告警。
 
 ---
 

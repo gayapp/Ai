@@ -251,21 +251,20 @@ curl -X POST "$BASE/v1/analyze/$REQ/ack" \
 # → 200 + {request_id, acked_at}
 ```
 
-Python / Node SDK 见各 app 自身 integration 文档（如 [apps/IRC-integration.md](apps/IRC-integration.md)）。
+Python / Node SDK 见各 app 自身 integration 文档（如 [apps/IRC-analyze-handoff.md](apps/IRC-analyze-handoff.md)）。
 
 ---
 
 ## 7. Admin 后台
 
-Admin UI（`https://aicenter.1.gay`）"Analyze 调用记录"页支持：
+Admin UI（`https://aicenter.1.gay`）"内容服务记录"页支持：
 
-- 按 app / biz_type / biz_id / 时间范围 / status 筛选
+- 按 app / biz_type / biz_id / 时间窗 / status / delivery mode 筛选
 - 列表展示元数据（id / status / provider / latency / tokens / delivered_at / acked_at）
-- 点击展开看完整 `input_json` + `result_json`（JSON tree viewer）
-- 复制 input / result 为 JSON 字符串
-- 单条复跑（开发模式开放，prod 默认不开放）
+- 点击行查看完整 `input_json` + `result_json` + `extra_json`
+- 从 `Analyze 灰度` 页可带 app / status / window 跳转到记录页
 
-详见 Admin UI 操作手册（与本文档分离维护，未来加 `docs/15-admin-analyze-ui.md`）。
+灰度门禁入口为 `#/analyze-ops`。详见 [10-admin-ui.md](10-admin-ui.md) 与 [16-admin-console-roadmap.md](16-admin-console-roadmap.md)。
 
 ---
 

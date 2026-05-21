@@ -22,6 +22,7 @@
 | 调 prompt 的正确姿势 | [docs/05-prompts.md](docs/05-prompts.md) |
 | 看哪些统计指标 | [docs/06-stats.md](docs/06-stats.md) |
 | 线上出问题怎么办 | [docs/07-runbook.md](docs/07-runbook.md) |
+| 管理后台规划 | [docs/16-admin-console-roadmap.md](docs/16-admin-console-roadmap.md) |
 | 内容服务总览 | [docs/12-content-service.md](docs/12-content-service.md) |
 | Analyze 回调契约 | [docs/13-callback-spec-analyze.md](docs/13-callback-spec-analyze.md) |
 | Analyze pull / 调用记录 | [docs/14-analyze-records.md](docs/14-analyze-records.md) |
@@ -72,7 +73,8 @@ scripts/      运维脚本（创建 app、轮换密钥等）
 
 ### Admin Web UI
 - **默认**：<https://ai-guard-admin.pages.dev>（立即可用）
-- **自定义域名**：`https://aicenter.1.gay`（Pages 已申请，等 CNAME 记录，详见 [docs/10-admin-ui.md](docs/10-admin-ui.md)）
+- **自定义域名**：<https://aicenter.1.gay>
+- **IRC 灰度页面**：`#/analyze-ops`
 
 ### 接入中的应用
 - [一起看](docs/apps/一起看-integration.md) · `app_f2ce7d84dec8ad56`

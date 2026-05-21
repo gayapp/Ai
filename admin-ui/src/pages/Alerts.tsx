@@ -6,10 +6,14 @@ export default function AlertsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function send(kind: "test" | "check") {
+  async function send(kind: "test" | "check" | "provider-health") {
     setErr(null); setBusy(true); setResult(null);
     try {
-      const r = kind === "test" ? await Alerts.test() : await Alerts.check();
+      const r = kind === "test"
+        ? await Alerts.test()
+        : kind === "check"
+          ? await Alerts.check()
+          : await Alerts.providerHealth();
       setResult(r);
     } catch (e) { setErr(String(e)); }
     finally { setBusy(false); }
@@ -55,6 +59,8 @@ wrangler secret put TELEGRAM_CHAT_ID`}</pre>
         <h3>操作</h3>
         <button className="btn" disabled={busy} onClick={() => send("test")}>发送测试消息</button>{" "}
         <button className="btn secondary" disabled={busy} onClick={() => send("check")}>立即跑一次阈值检查</button>
+        {" "}
+        <button className="btn secondary" disabled={busy} onClick={() => send("provider-health")}>检查 Provider 健康</button>
         {err && <div className="error mt16">{err}</div>}
         {result && (
           <pre className="mt16">{JSON.stringify(result, null, 2)}</pre>

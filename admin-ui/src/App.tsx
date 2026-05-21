@@ -6,6 +6,7 @@ import Apps from "./pages/Apps";
 import Prompts from "./pages/Prompts";
 import Requests from "./pages/Requests";
 import AnalyzeRecords from "./pages/AnalyzeRecords";
+import AnalyzeOps from "./pages/AnalyzeOps";
 import Callbacks from "./pages/Callbacks";
 import AlertsPage from "./pages/Alerts";
 import { clearToken, getApiBase, getToken } from "./lib/api";
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/prompts" element={<Prompts />} />
         <Route path="/requests" element={<Requests />} />
         <Route path="/analyze-records" element={<AnalyzeRecords />} />
+        <Route path="/analyze-ops" element={<AnalyzeOps />} />
         <Route path="/callbacks" element={<Callbacks />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
@@ -59,7 +61,10 @@ function Layout({ children, onLogout }: { children: React.ReactNode; onLogout: (
           📝 审核记录
         </NavLink>
         <NavLink className={({isActive}) => "nav-item" + (isActive ? " active" : "")} to="/analyze-records">
-          Analyze Records
+          内容服务记录
+        </NavLink>
+        <NavLink className={({isActive}) => "nav-item" + (isActive ? " active" : "")} to="/analyze-ops">
+          Analyze 灰度
         </NavLink>
         <NavLink className={({isActive}) => "nav-item" + (isActive ? " active" : "")} to="/callbacks">
           📮 回调投递

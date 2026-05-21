@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   AnalyzeRecords,
   Apps,
@@ -11,14 +12,18 @@ import { BoolPill, ProviderPill, StatusPill } from "../components/common";
 const BIZ = ["", "media_analysis", "media_intro"];
 const STATUS = ["", "pending", "ok", "error"];
 const DELIVERY = ["", "callback", "pull", "both"];
+const PERIODS = ["1h", "24h", "7d"] as const;
+type Period = typeof PERIODS[number];
 
 export default function AnalyzeRecordsPage() {
+  const location = useLocation();
   const [apps, setApps] = useState<AppConfig[]>([]);
   const [appId, setAppId] = useState("");
   const [biz, setBiz] = useState("");
   const [bizId, setBizId] = useState("");
   const [status, setStatus] = useState("");
   const [delivery, setDelivery] = useState("");
+  const [period, setPeriod] = useState<Period>("24h");
   const [limit, setLimit] = useState(100);
   const [items, setItems] = useState<AnalyzeRecordRow[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -28,10 +33,23 @@ export default function AnalyzeRecordsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
 
   useEffect(() => { Apps.list().then((r) => setApps(r.items)).catch(() => {}); }, []);
-  useEffect(() => { load(); }, [appId, biz, status, delivery, limit]);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const nextPeriod = params.get("period");
+    setAppId(params.get("app_id") ?? "");
+    setBiz(params.get("biz_type") ?? "");
+    setBizId(params.get("biz_id") ?? "");
+    setStatus(params.get("status") ?? "");
+    setDelivery(params.get("delivery_mode") ?? "");
+    if (nextPeriod === "1h" || nextPeriod === "24h" || nextPeriod === "7d") {
+      setPeriod(nextPeriod);
+    }
+  }, [location.search]);
+  useEffect(() => { load(); }, [appId, biz, status, delivery, period, limit]);
 
   async function load() {
     setErr(null); setLoading(true); setCursor(null);
+    const range = periodRange(period);
     try {
       const r = await AnalyzeRecords.list({
         app_id: appId || undefined,
@@ -39,6 +57,7 @@ export default function AnalyzeRecordsPage() {
         biz_id: bizId || undefined,
         status: status || undefined,
         delivery_mode: delivery || undefined,
+        ...range,
         limit,
       });
       setItems(r.items);
@@ -50,6 +69,7 @@ export default function AnalyzeRecordsPage() {
   async function loadMore() {
     if (!cursor || loadingMore) return;
     setErr(null); setLoadingMore(true);
+    const range = periodRange(period);
     try {
       const r = await AnalyzeRecords.list({
         app_id: appId || undefined,
@@ -57,6 +77,7 @@ export default function AnalyzeRecordsPage() {
         biz_id: bizId || undefined,
         status: status || undefined,
         delivery_mode: delivery || undefined,
+        ...range,
         limit,
         cursor,
       });
@@ -96,6 +117,12 @@ export default function AnalyzeRecordsPage() {
           <label>delivery</label>
           <select value={delivery} onChange={(e) => setDelivery(e.target.value)}>
             {DELIVERY.map((d) => <option key={d} value={d}>{d || "all"}</option>)}
+          </select>
+        </div>
+        <div>
+          <label>window</label>
+          <select value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
+            {PERIODS.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
         <div>
@@ -155,6 +182,15 @@ export default function AnalyzeRecordsPage() {
       {detailId && <AnalyzeDetail id={detailId} onClose={() => setDetailId(null)} />}
     </>
   );
+}
+
+function periodRange(period: Period): { from: string; to: string } {
+  const hours = period === "1h" ? 1 : period === "24h" ? 24 : 24 * 7;
+  const now = Date.now();
+  return {
+    from: new Date(now - hours * 3600 * 1000).toISOString(),
+    to: new Date(now).toISOString(),
+  };
 }
 
 function AnalyzeDetail({ id, onClose }: { id: string; onClose: () => void }) {

@@ -187,6 +187,51 @@ export interface AnalyzeSummaryData {
   output_bytes_total: number;
 }
 
+export interface PercentileData {
+  count: number;
+  p50: number | null;
+  p95: number | null;
+  p99: number | null;
+  max: number | null;
+}
+
+export interface AnalyzeGrayData {
+  from: string;
+  to: string;
+  app_id: string | null;
+  sample_limit: number;
+  sample_size: number;
+  ready_for_next_stage: boolean;
+  gates: Record<string, boolean>;
+  status: {
+    by_status: { pending: number; ok: number; error: number };
+    error_rate: number;
+    ok_rate: number;
+    pending_older_than_5m: number;
+  };
+  latency_ms: PercentileData;
+  tokens: {
+    input: PercentileData;
+    output: PercentileData;
+  };
+  baseline: {
+    internal_p95_ms: number | null;
+    p95_ratio: number | null;
+    max_allowed_p95_ms: number | null;
+  };
+  dedup: {
+    cached: number;
+    hit_rate: number;
+    expected_min_hit_rate: number;
+  };
+  delivery: {
+    callback_undelivered: number;
+    pull_unacked: number;
+  };
+  error_codes: Record<string, number>;
+  by_biz_type: Record<string, number>;
+}
+
 export interface AnalyzeRecordRow {
   request_id: string;
   app_id: string;
@@ -280,6 +325,14 @@ export const Stats = {
     api<SummaryData>(`/admin/stats/summary${qs(q)}`),
   analyzeSummary: (q: { from?: string; to?: string; app_id?: string } = {}) =>
     api<AnalyzeSummaryData>(`/admin/stats/analyze-summary${qs(q)}`),
+  analyzeGray: (q: {
+    from?: string;
+    to?: string;
+    app_id?: string;
+    limit?: number;
+    baseline_p95_ms?: number;
+  } = {}) =>
+    api<AnalyzeGrayData>(`/admin/stats/analyze-gray${qs(q)}`),
   requests: (q: {
     app_id?: string;
     biz_type?: string;
@@ -321,6 +374,8 @@ export const Alerts = {
     "/admin/alerts/test", { method: "POST" }),
   check: () => api<{ checks: string[]; fired: string[] }>(
     "/admin/alerts/check", { method: "POST" }),
+  providerHealth: () => api<unknown>(
+    "/admin/alerts/provider-health", { method: "POST" }),
 };
 
 function qs(o: Record<string, string | number | undefined>): string {

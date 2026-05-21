@@ -5,7 +5,7 @@
 ## 生产状态（prod）
 
 - **Prod API**：<https://aicenter-api.1.gay> / <https://ai-guard.schetkovvlad.workers.dev>
-- **Admin Web UI**：<https://ai-guard-admin.pages.dev>
+- **Admin Web UI**：<https://aicenter.1.gay> / <https://ai-guard-admin.pages.dev>
 - **健康检查**：`GET /health` → 200
 - **当前 Worker 版本**：`1ef078f3-7434-43d2-8247-dfd8e7113c69`（最近一次生产 deploy）
 - **D1 migrations**：`0001` 到 `0011` 已应用
@@ -19,7 +19,7 @@
 
 - **Dev URL**：<https://ai-guard-dev.schetkovvlad.workers.dev>
 - **Prod URL**：<https://aicenter-api.1.gay> / <https://ai-guard.schetkovvlad.workers.dev>
-- **Admin Web UI**：<https://ai-guard-admin.pages.dev>（自定义域名 <https://aicenter.1.gay> 待 DNS 生效）
+- **Admin Web UI**：<https://aicenter.1.gay> / <https://ai-guard-admin.pages.dev>
 - **健康检查**：`GET /health` → `{"ok":true,...}`
 - **绑定资源**（wrangler.toml `[env.dev]`）
 
@@ -54,6 +54,8 @@
 |---------|---------|------|
 | comment / nickname / bio | Grok | `grok-4-fast-non-reasoning` |
 | avatar | Gemini Vision | `gemini-2.5-flash` |
+| media_analysis | xAI / Gemini | `grok-4-fast-non-reasoning` / `gemini-2.5-flash` |
+| media_intro | xAI / Gemini | `grok-4-fast-non-reasoning` / `gemini-2.5-flash` |
 
 Provider 可在 Admin API / wrangler.toml `[vars]` 热切换，无需改代码。
 
@@ -141,7 +143,7 @@ curl -sS "$BASE/v1/moderate" \
 - `media_analysis` / `media_intro`
 - `analyze_requests` 长留存表
 - analyze callback schema `1.1`
-- Admin UI analyze tab 与调用记录页
+- Admin UI analyze dashboard、灰度页与调用记录页
 - analyze 灰度指标接口 `/admin/stats/analyze-gray`
 
 后续生产变更流程：

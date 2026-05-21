@@ -2,76 +2,136 @@
 
 ## 访问地址
 
-- **默认 URL**：<https://ai-guard-admin.pages.dev>（立刻可用）
-- **自定义域名**：`https://aicenter.1.gay`（**待完成一步**，见下）
+- **自定义域名**：<https://aicenter.1.gay>
+- **Pages 默认域名**：<https://ai-guard-admin.pages.dev>
+- **API Base 默认值**：`https://aicenter-api.1.gay`
 
 ## 登录
 
-1. 打开 URL
-2. `API Base` 保留默认 `https://aicenter-api.1.gay`
-3. `ADMIN_TOKEN` 粘贴（从 `SECRETS.local.md` 或新建环境的 wrangler secret）
-4. Token 存浏览器 localStorage，登出会清
+1. 打开 Admin UI。
+2. `API Base` 保留默认生产域名，开发时可改成 localhost 或 dev Worker。
+3. 填入 `ADMIN_TOKEN`。
+4. Token 只存浏览器 localStorage，点击退出会清除。
+
+不要在文档、聊天或 issue 中粘贴 `ADMIN_TOKEN`、app secret、Cloudflare token。
 
 ## 页面清单
 
 | 路径 | 功能 |
-|------|------|
-| `/dashboard` | 总览（请求数/通过率/缓存命中率/Token 消耗/状态堆叠条 + 最近 20 条） |
-| `/requests` | 全量审核记录（按 app/biz/status 过滤，点行看详情） |
-| `/callbacks` | 回调投递列表（可筛仅失败） |
-| `/apps` | 应用管理（新建/轮换 secret/启用禁用） |
-| `/prompts` | Prompt 管理（新版本/回滚/干跑） |
-| `/alerts` | Telegram 告警配置 + 手动测试 |
+| --- | --- |
+| `/dashboard` | moderate / analyze 双轨总览：总量、状态、缓存、token、analyze 结果大小 |
+| `/requests` | moderate 审核记录：按 app / biz / status 过滤，点击行看详情和 replay |
+| `/analyze-ops` | analyze 灰度门禁：Ready、错误率、P95、pull/callback 积压、分布 |
+| `/analyze-records` | analyze 长留存记录：按 app / biz / status / delivery / biz_id / 时间窗过滤 |
+| `/callbacks` | callback 投递记录：支持只看失败或未投递 |
+| `/apps` | app 管理：新建、编辑、禁用、轮换 secret，支持 `IRC analyze` 预设 |
+| `/prompts` | prompt 管理：moderate / analyze prompt 版本、发布、回滚 |
+| `/alerts` | Telegram 告警测试、阈值检查、provider health 手动检查 |
 
-### 审核记录详情（点击行）
+## IRC 常用操作
 
-完整字段：request_id / app_id / biz_type / biz_id / user_id / content_hash / status / risk_level / categories / reason / provider / model / prompt_version / tokens / latency_ms / callback_url / mode / cached / extra / 创建/完成时间。
+### 创建 IRC analyze app
 
-### 应用管理
-- 新建应用：弹窗选启用的 biz_types、QPS 限额、回调 URL；创建后一次性弹出 secret
-- 轮换 secret：旧的立即失效
-- 启用/禁用：软禁用，不删除历史
+路径：`/apps`
 
-### Prompt 管理
-- 按 biz_type × provider 筛选，展示全部历史版本
-- 当前 active 在卡片高亮
-- "发布新版本"：编辑弹窗（默认带上当前 active 正文），发布立即生效
-- "回滚到此"：任一历史版本一键切回 active
-- "干跑测试"：临时 prompt + N 条样本，走真实模型但不影响线上
+1. 点击 `New app`。
+2. 点击 `IRC analyze` 预设。
+3. 填名称和 callback URL。
+4. 确认：
+   - `analyze_biz_types`: `media_analysis`, `media_intro`
+   - `delivery_mode`: `both`
+   - `provider_strategy`: `auto`
+5. 创建后只显示一次 secret，请交给 IRC 安全配置。
 
-### Telegram 告警
-- 说明了从创建 Bot → 拿 chat_id → 配置 secret 的 4 步
-- "发送测试消息"：立刻触发一条测试告警
-- "立即跑一次阈值检查"：手动执行 scheduled 里的检查逻辑
+### 灰度升档检查
+
+路径：`/analyze-ops`
+
+1. 选择 IRC app。
+2. 选择观察窗口，正式升档建议 `24h`。
+3. 填 IRC 原方案的 `baseline p95 ms`。
+4. 点击 `Refresh`。
+5. `Ready=YES` 且各 gate 通过后再升档。
+
+如果 `Ready=NO`：
+
+- 点 `只看错误` 进入 analyze 记录页查看 `error_code`。
+- `pull_unacked > 0`：检查 IRC ack cron。
+- `callback_undelivered > 0`：检查 IRC callback endpoint。
+- provider 相关错误：去 `/alerts` 点 `检查 Provider 健康`。
+
+### 单条 analyze 追查
+
+路径：`/analyze-records`
+
+可按 `biz_id` 对账 IRC 业务记录。点击行后可查看：
+
+- `input_json`
+- `result_json`
+- `provider / model / prompt_version`
+- `delivery_mode`
+- `delivered_at`
+- `acked_at`
+- `error_code`
+
+## moderate 记录详情
+
+路径：`/requests`
+
+点击行可查看完整 moderate 请求：
+
+- request_id / app_id / biz_type / biz_id / user_id
+- content_hash / content_text / evidence
+- status / risk_level / categories / reason
+- provider / model / prompt_version
+- tokens / latency_ms / cached
+- callback_url / mode / error_code / extra
+
+文本类记录支持 replay，用当前 active prompt 重新跑一次，不写数据库。
+
+## 应用管理
+
+路径：`/apps`
+
+- 新建 app：选择 moderate / analyze biz types、delivery mode、QPS、callback URL。
+- `IRC analyze` 预设：清空 moderate biz，选择 `media_analysis` + `media_intro`，delivery 设置为 `both`。
+- 轮换 secret：旧 secret 立即失效，新 secret 只显示一次。
+- 禁用 app：软禁用，历史记录保留。
+
+## Prompt 管理
+
+路径：`/prompts`
+
+- moderate providers：`grok` / `gemini`
+- analyze providers：`xai` / `gemini`
+- 发布新版本后立即 active。
+- 回滚会切回历史版本。
+- moderate 支持 dry-run；analyze dry-run 列入下一轮规划。
+
+## 告警
+
+路径：`/alerts`
+
+支持三个手动动作：
+
+- 发送 Telegram 测试消息。
+- 立即跑一次阈值检查。
+- 检查 provider health。
+
+Cron 自动行为：
+
+- 每 5 分钟跑阈值检查。
+- 每小时跑 provider health。
+
+阈值在 `src/alerts/telegram.ts` 中定义，改动后需要重新部署 Worker。
 
 ## 技术栈
 
-- **React 19** + **Vite 7** + **react-router v7** (HashRouter，适配 Pages 静态托管)
-- 无 UI 库、无状态管理库 —— 纯 React + CSS（手写暗色主题，支持浅色模式）
-- 所有 API 走 `src/lib/api.ts`，`Authorization: Bearer <token>` 统一处理
-- 产物：263KB / 82KB gzipped
+- React 19 + Vite 7 + react-router v7，使用 HashRouter 适配 Pages 静态托管。
+- 无 UI 库、无状态管理库，纯 React + CSS。
+- API 客户端集中在 `admin-ui/src/lib/api.ts`。
+- 静态资源由 Cloudflare Pages 托管，可独立于 Worker 发布。
 
-## 完成 `aicenter.gv.live` 的最后一步
+## 规划
 
-Pages 自定义域名已申请，但 DNS CNAME 记录需要 Zone:DNS:Edit 权限（当前 API Token 不含）。二选一：
-
-### 方案 A · CF Dashboard 手动加 CNAME（推荐，30 秒）
-
-1. 打开 <https://dash.cloudflare.com/> → 选 `1.gay` 域 → DNS → Records
-2. 点 "Add record"：
-   - **Type**：`CNAME`
-   - **Name**：`aicenter`
-   - **Target**：`ai-guard-admin.pages.dev`
-   - **Proxy**：✅ Proxied（橙云）
-   - **TTL**：Auto
-3. 保存。2 分钟内 Pages 自动签发 SSL，`https://aicenter.1.gay` 生效
-
-### 方案 B · 生成 DNS Edit Token 我自动做
-
-新建一个 API Token（My Profile → API Tokens → Create Token → Custom），权限：
-
-- Zone / DNS / Edit（对 `1.gay` 或 All zones）
-- Account / Cloudflare Pages / Edit
-- Account / Workers Scripts / Edit
-
-给我新 token，我一条命令搞定。
+后台全面规划见 [16-admin-console-roadmap.md](16-admin-console-roadmap.md)。
