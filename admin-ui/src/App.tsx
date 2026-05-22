@@ -11,6 +11,7 @@ import Callbacks from "./pages/Callbacks";
 import AlertsPage from "./pages/Alerts";
 import Providers from "./pages/Providers";
 import AuditLogs from "./pages/AuditLogs";
+import Roadmap from "./pages/Roadmap";
 import { clearToken, getApiBase, getToken } from "./lib/api";
 
 export default function App() {
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/callbacks" element={<Callbacks />} />
         <Route path="/providers" element={<Providers />} />
         <Route path="/audit" element={<AuditLogs />} />
+        <Route path="/roadmap" element={<Roadmap />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
@@ -89,6 +91,9 @@ function Layout({ children, onLogout }: { children: React.ReactNode; onLogout: (
         </NavLink>
         <NavLink className={({isActive}) => "nav-item" + (isActive ? " active" : "")} to="/alerts">
           🔔 告警
+        </NavLink>
+        <NavLink className={({isActive}) => "nav-item" + (isActive ? " active" : "")} to="/roadmap">
+          任务清单
         </NavLink>
 
         <div className="nav-section">链接</div>

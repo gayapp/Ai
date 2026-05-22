@@ -29,6 +29,7 @@
 | `/apps` | app 管理：新建、编辑、禁用、轮换 secret，支持 `IRC analyze` 预设 |
 | `/prompts` | prompt 管理：moderate / analyze prompt 版本、发布、回滚 |
 | `/alerts` | Telegram 告警测试、阈值检查、provider health 手动检查 |
+| `/roadmap` | 后续开发任务清单：Next / Planned / Needs input / Done |
 
 ## IRC 常用操作
 
@@ -185,4 +186,4 @@ Cron 自动行为：
 
 ## 规划
 
-后台全面规划见 [16-admin-console-roadmap.md](16-admin-console-roadmap.md)。
+后台全面规划见 [16-admin-console-roadmap.md](16-admin-console-roadmap.md)，细粒度任务看板见 [17-admin-console-task-list.md](17-admin-console-task-list.md)。Admin UI 内可访问 `#/roadmap`。

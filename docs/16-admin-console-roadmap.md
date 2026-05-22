@@ -95,6 +95,8 @@ detail 中重点字段：
 
 ## 开发路线
 
+细粒度任务看板见 [17-admin-console-task-list.md](17-admin-console-task-list.md)。Admin UI 也提供 `#/roadmap` 页面，方便在后台直接查看下一步计划。
+
 ### P0 已完成
 
 - app 双轨配置：`biz_types` + `analyze_biz_types`。
@@ -135,3 +137,4 @@ detail 中重点字段：
 - Analyze pull / 调用记录：[14-analyze-records.md](14-analyze-records.md)
 - Analyze 灰度 runbook：[15-analyze-gray-runbook.md](15-analyze-gray-runbook.md)
 - IRC 交接：[apps/IRC-analyze-handoff.md](apps/IRC-analyze-handoff.md)
+- Admin Console 任务清单：[17-admin-console-task-list.md](17-admin-console-task-list.md)
