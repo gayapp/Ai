@@ -163,6 +163,73 @@ Authorization: Bearer <ADMIN_TOKEN>
 
 ---
 
+## Prompt Regression Sets
+
+用于发布 prompt 前固定样本回归。详见 [18-prompt-regression-sets.md](18-prompt-regression-sets.md)。
+
+### `GET /admin/prompt-regression`
+
+Query：`biz_type`、`provider`、`limit`。
+
+返回样本集摘要：
+
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "name": "IRC media_analysis regression",
+      "biz_type": "media_analysis",
+      "provider": "xai",
+      "sample_count": 3,
+      "created_by": "admin",
+      "created_at": 1780000000000,
+      "updated_at": 1780000000000
+    }
+  ]
+}
+```
+
+### `POST /admin/prompt-regression`
+
+创建样本集。
+
+```json
+{
+  "name": "IRC media_analysis regression",
+  "biz_type": "media_analysis",
+  "provider": "xai",
+  "samples": [
+    {
+      "name": "single image",
+      "input": "{\"image_urls\":[\"https://example.com/frame.jpg\"]}"
+    }
+  ]
+}
+```
+
+### `GET /admin/prompt-regression/{id}`
+
+返回样本集详情。
+
+### `PATCH /admin/prompt-regression/{id}`
+
+可更新 `name`、`samples`。
+
+### `POST /admin/prompt-regression/{id}/run`
+
+用当前 active prompt 与请求中的 draft prompt 分别跑同一组样本。
+
+```json
+{
+  "draft_content": "完整 draft prompt"
+}
+```
+
+返回包含 `active_version`、`summary`、每条样本的 `active` / `draft` dry-run 结果、`changed`、schema 校验结果和可选 expected 匹配结果。
+
+---
+
 ## Stats（统计）
 
 ### `GET /admin/stats/summary`

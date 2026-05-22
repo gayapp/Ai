@@ -28,6 +28,7 @@
 | `/audit` | 审计日志：app / prompt 高影响管理动作 |
 | `/apps` | app 管理：新建、编辑、禁用、轮换 secret，支持 `IRC analyze` 预设 |
 | `/prompts` | prompt 管理：moderate / analyze prompt 版本、发布、回滚 |
+| `/prompt-regression` | prompt 回归样本集：保存样本、运行 draft vs active、查看差异 |
 | `/alerts` | Telegram 告警测试、阈值检查、provider health 手动检查 |
 | `/roadmap` | 后续开发任务清单：Next / Planned / Needs input / Done |
 
@@ -54,7 +55,8 @@
 2. 选择观察窗口，正式升档建议 `24h`。
 3. 填 IRC 原方案的 `baseline p95 ms`。
 4. 点击 `Refresh`。
-5. `Ready=YES` 且各 gate 通过后再升档。
+5. 点击 `Copy report` 可复制 Markdown 灰度报告。
+6. `Ready=YES` 且各 gate 通过后再升档。
 
 如果 `Ready=NO`：
 
@@ -120,6 +122,16 @@
   - `media_intro`：一行一个 JSON input object，真实请求 xAI / Gemini text provider 并校验 `MediaIntroOutput`。
   - `media_analysis`：一行一个 JSON input object，只做 input schema 校验和 prompt preview，不请求多模态 provider。
 
+## Prompt regression
+
+路径：`/prompt-regression`
+
+- 按 `biz_type` / `provider` 管理样本集。
+- 样本集长期保存在 D1 `prompt_regression_sets`，不做 TTL。
+- `Run draft vs active` 会复用 `/admin/prompts/dry-run` 的同一套执行逻辑。
+- `media_analysis` 回归只做 input schema + prompt preview；真实多模态行为仍通过 `/v1/analyze` smoke 和灰度门禁验证。
+- 管理动作会写入审计日志：`prompt_regression.create`、`prompt_regression.update`、`prompt_regression.run`。
+
 ## App Onboarding
 
 路径：`/apps`
@@ -146,6 +158,8 @@
 - 回滚 prompt
 
 支持按时间窗、action、target type、target id、actor 过滤。审计 metadata 不包含 app secret 明文。
+
+`Export CSV` 会导出当前页面已经加载的过滤结果，字段包括 `id`、`created_at`、`actor`、`action`、`target_type`、`target_id`、`metadata_json`。
 
 ## 告警
 

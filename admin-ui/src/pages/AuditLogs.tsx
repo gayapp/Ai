@@ -8,8 +8,11 @@ const ACTIONS = [
   "app.rotate_secret",
   "prompt.publish",
   "prompt.rollback",
+  "prompt_regression.create",
+  "prompt_regression.update",
+  "prompt_regression.run",
 ];
-const TARGET_TYPES = ["", "app", "prompt"];
+const TARGET_TYPES = ["", "app", "prompt", "prompt_regression_set"];
 const PERIODS = ["1h", "24h", "7d"] as const;
 type Period = typeof PERIODS[number];
 
@@ -25,6 +28,7 @@ export default function AuditLogsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [exported, setExported] = useState(false);
 
   useEffect(() => { load(); }, [period, action, targetType, limit]);
 
@@ -75,6 +79,21 @@ export default function AuditLogsPage() {
     }
   }
 
+  function exportCsv() {
+    const csv = toAuditCsv(items);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ai-guard-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setExported(true);
+    window.setTimeout(() => setExported(false), 1600);
+  }
+
   return (
     <>
       <h1 className="page-title">审计日志</h1>
@@ -115,6 +134,9 @@ export default function AuditLogsPage() {
           </select>
         </div>
         <button className="btn small secondary" onClick={load}>Refresh</button>
+        <button className="btn small secondary" disabled={items.length === 0} onClick={exportCsv}>
+          {exported ? "Exported" : "Export CSV"}
+        </button>
       </div>
 
       <div className="card">
@@ -162,4 +184,24 @@ function periodRange(period: Period): { from: string; to: string } {
     from: new Date(now - hours * 3600 * 1000).toISOString(),
     to: new Date(now).toISOString(),
   };
+}
+
+function toAuditCsv(items: AuditLogRow[]): string {
+  const header = ["id", "created_at", "actor", "action", "target_type", "target_id", "metadata_json"];
+  const rows = items.map((row) => [
+    row.id,
+    row.created_at,
+    row.actor,
+    row.action,
+    row.target_type,
+    row.target_id,
+    row.metadata ? JSON.stringify(row.metadata) : "",
+  ]);
+  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+function csvCell(value: unknown): string {
+  const s = String(value ?? "");
+  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
 }

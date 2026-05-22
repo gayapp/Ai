@@ -60,6 +60,7 @@ analyze 线额外支持 `delivery_mode ∈ {callback, pull, both}`，默认 `bot
 | 响应模式 | 混合自适应 |
 | 路由策略 | 业务类型配主 provider，失败熔断切备 |
 | Prompt 管理 | D1 存储 + KV 缓存 60s，版本化，发布即生效 |
+| Prompt 回归 | 管理台保存样本集，发布前运行 draft vs active |
 | 回调契约 | 代码层 Zod 锁死；prompt 改不了结构 |
 | 内容服务交付 | analyze 线支持 callback + pull 双轨，默认 `both` |
 
@@ -97,6 +98,7 @@ analyze 线额外支持 `delivery_mode ∈ {callback, pull, both}`，默认 `bot
 - Analyze 回调 → [13-callback-spec-analyze.md](13-callback-spec-analyze.md)
 - Analyze 调用记录 / pull → [14-analyze-records.md](14-analyze-records.md)
 - Analyze 灰度 → [15-analyze-gray-runbook.md](15-analyze-gray-runbook.md)
+- Prompt 回归样本集 → [18-prompt-regression-sets.md](18-prompt-regression-sets.md)
 - IRC Analyze 接入交接 → [apps/IRC-analyze-handoff.md](apps/IRC-analyze-handoff.md)
 - Admin Web UI → [10-admin-ui.md](10-admin-ui.md)
 - Admin Console 全面规划 → [16-admin-console-roadmap.md](16-admin-console-roadmap.md)

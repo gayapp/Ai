@@ -4,6 +4,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Apps from "./pages/Apps";
 import Prompts from "./pages/Prompts";
+import PromptRegression from "./pages/PromptRegression";
 import Requests from "./pages/Requests";
 import AnalyzeRecords from "./pages/AnalyzeRecords";
 import AnalyzeOps from "./pages/AnalyzeOps";
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/apps" element={<Apps />} />
         <Route path="/prompts" element={<Prompts />} />
+        <Route path="/prompt-regression" element={<PromptRegression />} />
         <Route path="/requests" element={<Requests />} />
         <Route path="/analyze-records" element={<AnalyzeRecords />} />
         <Route path="/analyze-ops" element={<AnalyzeOps />} />
@@ -88,6 +90,9 @@ function Layout({ children, onLogout }: { children: React.ReactNode; onLogout: (
         </NavLink>
         <NavLink className={({isActive}) => "nav-item" + (isActive ? " active" : "")} to="/prompts">
           💬 指令管理
+        </NavLink>
+        <NavLink className={({isActive}) => "nav-item" + (isActive ? " active" : "")} to="/prompt-regression">
+          Prompt regression
         </NavLink>
         <NavLink className={({isActive}) => "nav-item" + (isActive ? " active" : "")} to="/alerts">
           🔔 告警

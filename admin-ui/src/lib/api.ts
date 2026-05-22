@@ -335,6 +335,49 @@ export interface AuditLogRow {
   created_at: string;
 }
 
+export interface PromptRegressionSample {
+  name: string;
+  input: string;
+  expected?: unknown;
+}
+
+export interface PromptRegressionSetSummary {
+  id: number;
+  name: string;
+  biz_type: string;
+  provider: string;
+  sample_count: number;
+  created_by: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PromptRegressionSet extends PromptRegressionSetSummary {
+  samples: PromptRegressionSample[];
+}
+
+export interface PromptRegressionRunResult {
+  set_id: number;
+  name: string;
+  biz_type: string;
+  provider: string;
+  active_version: number;
+  sample_count: number;
+  summary: Record<string, number>;
+  results: Array<{
+    name: string;
+    input: string;
+    expected: unknown | null;
+    active: Record<string, unknown>;
+    draft: Record<string, unknown>;
+    changed: boolean;
+    active_schema_ok: boolean;
+    draft_schema_ok: boolean;
+    active_expected_match: boolean | null;
+    draft_expected_match: boolean | null;
+  }>;
+}
+
 export const Apps = {
   list: () => api<{ items: AppConfig[] }>("/admin/apps"),
   get: (id: string) => api<AppConfig>(`/admin/apps/${id}`),
@@ -440,6 +483,33 @@ export const Alerts = {
     "/admin/alerts/check", { method: "POST" }),
   providerHealth: () => api<ProviderHealthData>(
     "/admin/alerts/provider-health", { method: "POST" }),
+};
+
+export const PromptRegression = {
+  list: (q: { biz_type?: string; provider?: string; limit?: number } = {}) =>
+    api<{ items: PromptRegressionSetSummary[] }>(`/admin/prompt-regression${qs(q)}`),
+  create: (body: {
+    name: string;
+    biz_type: string;
+    provider: string;
+    samples: PromptRegressionSample[];
+    created_by?: string;
+  }) =>
+    api<PromptRegressionSet>("/admin/prompt-regression", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  get: (id: number) => api<PromptRegressionSet>(`/admin/prompt-regression/${id}`),
+  patch: (id: number, body: Partial<{ name: string; samples: PromptRegressionSample[] }>) =>
+    api<PromptRegressionSet>(`/admin/prompt-regression/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  run: (id: number, body: { draft_content: string }) =>
+    api<PromptRegressionRunResult>(`/admin/prompt-regression/${id}/run`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };
 
 export const Providers = {

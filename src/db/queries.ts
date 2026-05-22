@@ -157,8 +157,8 @@ export interface PromptRow {
 
 export async function getActivePrompt(
   db: D1Database,
-  bizType: BizType,
-  provider: Provider,
+  bizType: string,
+  provider: string,
 ): Promise<{ version: number; content: string } | null> {
   const row = await db
     .prepare(

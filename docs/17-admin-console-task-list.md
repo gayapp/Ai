@@ -34,23 +34,23 @@
 | ADM-007 | App onboarding | Done | 创建/轮换 secret 后展示 IRC env、pull/ack、HMAC |
 | ADM-008 | Analyze prompt dry-run | Done | `media_intro` provider 干跑；`media_analysis` schema + prompt preview |
 | ADM-009 | 审计日志 | Done | 记录 app create/update/rotate-secret 与 prompt publish/rollback |
+| ADM-010 | Roadmap / 任务清单页面 | Done | Admin UI 有 `/roadmap`，文档有本清单 |
+| ADM-011 | Analyze 灰度报告复制 | Done | `/analyze-ops` 支持复制 Markdown 报告 |
+| ADM-012 | 审计日志 CSV 导出 | Done | `/audit` 支持导出当前已加载过滤结果 |
+| ADM-013 | Prompt regression set 设计 | Done | [18-prompt-regression-sets.md](18-prompt-regression-sets.md) 定义样本集格式、保存策略和对比口径 |
+| ADM-014 | Prompt regression set 实现 | Done | 可保存样本集、运行 draft vs active、展示差异 |
 
 ## 下一批开发
 
 | ID | 优先级 | 任务 | 为什么做 | 验收 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| ADM-010 | P1 | Roadmap / 任务清单页面 | 用户可以在后台看到下一步计划 | Admin UI 有 `/roadmap`，文档有本清单 | 本轮推进 |
-| ADM-011 | P1 | Analyze 灰度报告复制 | IRC 升档需要把门禁结果贴到群或 issue | `/analyze-ops` 支持复制 Markdown 报告 | 不改后端 |
-| ADM-012 | P1 | 审计日志 CSV 导出 | 方便安全审查 | `/audit` 支持导出当前过滤结果 | 前端导出即可 |
-| ADM-013 | P1 | Prompt regression set 设计 | 发布 prompt 前要比对样本集 | 文档先定义样本集格式与保存策略 | 可能需要 D1 表 |
+| ADM-015 | P2 | 多环境明显标识 | 防止 dev/prod 操作混淆 | Header 明确显示 API Base 环境和危险提示 | 仅前端 |
+| ADM-016 | P2 | 灰度 runbook 内嵌 | 失败 gate 直接看处置建议 | `/analyze-ops` 每个失败 gate 展示对应处理步骤 | 仅前端 |
 
 ## 已规划
 
 | ID | 优先级 | 任务 | 为什么做 | 验收 | 风险 |
 | --- | --- | --- | --- | --- | --- |
-| ADM-014 | P2 | Prompt regression set 实现 | 降低 prompt 发布回归风险 | 可保存样本集、运行 draft vs active、展示差异 | 需要新增表和更多模型调用 |
-| ADM-015 | P2 | 多环境明显标识 | 防止 dev/prod 操作混淆 | Header 明确显示 API Base 环境和危险提示 | 仅前端 |
-| ADM-016 | P2 | 灰度 runbook 内嵌 | 失败 gate 直接看到处置建议 | `/analyze-ops` 每个失败 gate 展示对应处理步骤 | 仅前端 |
 | ADM-017 | P2 | 成本看板 | 按 app / biz / provider 估算 token 成本 | Dashboard 增加成本估算卡片 | 需要维护模型价格配置 |
 | ADM-018 | P2 | Analyze records 导出 | 方便离线对账 | 当前过滤条件可导出 CSV | 注意 result_json 体积 |
 
@@ -58,11 +58,16 @@
 
 | ID | 事项 | 需要谁 | 说明 |
 | --- | --- | --- | --- |
-| INP-001 | IRC 独立 app 是否创建 | 用户 / IRC | 若需要隔离“一起看”，在 `/apps` 创建独立 IRC app |
 | INP-002 | IRC baseline P95 | IRC | `/analyze-ops` 灰度 gate 需要原内部方案 P95 |
 | INP-003 | IRC 灰度开始时间 | IRC | 避免 24h 窗口混入早期 smoke 失败样本 |
 | INP-004 | Prompt regression 样本 | 运营 / IRC | ADM-013/014 需要样本输入和预期输出 |
-| INP-005 | 权限模型 | 用户 | 是否需要只读/运营/管理员分级 |
+
+## 已确认输入
+
+| ID | 结论 |
+| --- | --- |
+| INP-001 | 用户已在管理后台创建 IRC app |
+| INP-005 | 用户确认当前不做权限分级，继续使用统一 `ADMIN_TOKEN` |
 
 ## 暂缓
 
@@ -74,11 +79,8 @@
 
 ## 下一步建议
 
-当前建议顺序：
+ADM-010 到 ADM-014 已完成。当前下一步建议：
 
-1. ADM-010 Roadmap / 任务清单页面。
-2. ADM-011 Analyze 灰度报告复制。
-3. ADM-012 审计日志 CSV 导出。
-4. ADM-013 Prompt regression set 设计。
-
-如果 IRC 灰度已经开始，优先 ADM-011。若还在准备接入，优先 ADM-013。
+1. ADM-015 多环境明显标识。
+2. ADM-016 灰度 runbook 内嵌。
+3. ADM-018 Analyze records 导出。

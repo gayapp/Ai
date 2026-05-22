@@ -28,7 +28,10 @@
 | `/analyze-records` 内容服务记录 | 长留存 input/result 明细，支持 app / biz / status / delivery / biz_id / window 过滤 | 按 `request_id` / `biz_id` 对账，查看完整 input_json / result_json |
 | `/apps` 应用管理 | 创建、编辑、禁用、轮换 secret；支持 `IRC analyze` 预设 | 创建 IRC 独立 app，选择 `media_analysis` / `media_intro` 和 `delivery_mode=both` |
 | `/prompts` 指令管理 | moderate 与 analyze prompt 版本管理，支持 analyze provider `xai` / `gemini` | 查看或发布 `media_analysis` / `media_intro` prompt |
+| `/prompt-regression` Prompt 回归 | 保存样本集，运行 `draft vs active`，查看差异与 schema 失败 | IRC prompt 发布前固定样本回归 |
 | `/callbacks` 回调投递 | 查看 callback 失败与重试 | 排查 IRC callback 未到达 |
+| `/audit` 审计日志 | 查看高影响管理动作，支持 CSV 导出 | 追踪 app、prompt、regression set 变更 |
+| `/roadmap` 任务清单 | 查看后续开发任务、状态和用户配合项 | 用户可在后台看到下一步计划 |
 | `/alerts` 告警 | Telegram 测试、阈值检查、provider health 手动检查 | Gemini / xAI 故障时辅助判断是否触发降级或熔断 |
 
 ## IRC 标准操作流
@@ -110,20 +113,24 @@ detail 中重点字段：
 - App onboarding：创建或轮换 secret 后显示 IRC env、pull/ack 入口和 HMAC 签名格式。
 - Analyze prompt dry-run：`media_intro` provider 干跑；`media_analysis` input schema + prompt preview。
 - 审计日志：记录 app create/update/rotate-secret 与 prompt publish/rollback。
+- Roadmap / 任务清单页面：后台可直接查看既定任务、状态和配合项。
+- Analyze 灰度报告复制：`/analyze-ops` 可复制 Markdown 报告。
+- 审计 CSV 导出：`/audit` 可导出当前过滤结果。
+- Prompt regression set：保存样本集，运行 `draft vs active`，展示差异和 schema 失败。
 
 ### P1 建议下一轮
 
 | 项 | 价值 | 验收 |
 | --- | --- | --- |
-| Analyze prompt regression set | Prompt 发布前批量跑固定样本集 | 支持保存样本集、对比 active vs draft |
-| 审计导出与告警 | 方便安全审查和异常操作追踪 | 支持 CSV 导出、可选 Telegram 通知 rotate-secret / prompt rollback |
+| 多环境明显标识 | 防止 dev/prod 操作混淆 | Header 明确显示 API Base 环境和危险提示 |
+| 灰度 runbook 内嵌 | 失败 gate 直接展示处置建议 | `/analyze-ops` 每个失败 gate 展示对应步骤 |
 
 ### P2 后续增强
 
 | 项 | 价值 |
 | --- | --- |
 | 多环境切换 | 在同一后台安全切换 dev / prod API Base，并显著标记环境 |
-| 角色权限 | 区分只读、运营、运维、超级管理员 |
+| 角色权限 | 已确认当前不做权限分级，继续使用统一 `ADMIN_TOKEN`；如后续需要再重新设计 |
 | 导出与报表 | CSV 导出 analyze 记录、灰度报告复制成 Markdown |
 | Runbook 内嵌 | 页面根据失败 gate 展示对应操作命令和文档链接 |
 | 成本看板 | 按 app / biz / provider 估算 token 与外部模型成本 |
@@ -138,3 +145,4 @@ detail 中重点字段：
 - Analyze 灰度 runbook：[15-analyze-gray-runbook.md](15-analyze-gray-runbook.md)
 - IRC 交接：[apps/IRC-analyze-handoff.md](apps/IRC-analyze-handoff.md)
 - Admin Console 任务清单：[17-admin-console-task-list.md](17-admin-console-task-list.md)
+- Prompt regression sets：[18-prompt-regression-sets.md](18-prompt-regression-sets.md)

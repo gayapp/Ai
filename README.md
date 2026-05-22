@@ -28,6 +28,7 @@
 | Analyze 回调契约 | [docs/13-callback-spec-analyze.md](docs/13-callback-spec-analyze.md) |
 | Analyze pull / 调用记录 | [docs/14-analyze-records.md](docs/14-analyze-records.md) |
 | Analyze 灰度 Runbook | [docs/15-analyze-gray-runbook.md](docs/15-analyze-gray-runbook.md) |
+| Prompt 回归样本集 | [docs/18-prompt-regression-sets.md](docs/18-prompt-regression-sets.md) |
 | IRC Analyze 接入交接 | [docs/apps/IRC-analyze-handoff.md](docs/apps/IRC-analyze-handoff.md) |
 
 ## 支持的业务类型
@@ -76,6 +77,7 @@ scripts/      运维脚本（创建 app、轮换密钥等）
 - **默认**：<https://ai-guard-admin.pages.dev>（立即可用）
 - **自定义域名**：<https://aicenter.1.gay>
 - **IRC 灰度页面**：`#/analyze-ops`
+- **Prompt 回归样本集**：`#/prompt-regression`
 - **后台任务清单**：`#/roadmap`
 
 ### 接入中的应用
@@ -100,4 +102,4 @@ MVP 已部署上线。dev + prod 环境均通过真实端到端验收：
 - Grok（`grok-4-fast-non-reasoning`）：文本审核 ~500ms
 - Gemini Vision（`gemini-2.5-flash`）：头像审核 ~3.5s
 - 缓存命中：~400ms（无 token 消耗）
-- 单元测试 21/21 pass
+- 单元测试 84/84 pass

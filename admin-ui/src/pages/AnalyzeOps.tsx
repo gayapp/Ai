@@ -32,10 +32,15 @@ export default function AnalyzeOpsPage() {
   const [backlog, setBacklog] = useState<AnalyzeBacklogData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const analyzeApps = useMemo(
     () => apps.filter((app) => app.analyze_biz_types.length > 0),
     [apps],
+  );
+  const selectedApp = useMemo(
+    () => apps.find((app) => app.id === appId) ?? null,
+    [apps, appId],
   );
 
   useEffect(() => { Apps.list().then((r) => setApps(r.items)).catch(() => {}); }, []);
@@ -72,6 +77,20 @@ export default function AnalyzeOpsPage() {
   const recordsHref = buildRecordsHref({ appId, period });
   const errorHref = buildRecordsHref({ appId, period, status: "error" });
 
+  async function copyReport() {
+    if (!data) return;
+    const report = buildGrayReport({
+      data,
+      backlog,
+      appName: selectedApp ? `${selectedApp.name} (${selectedApp.id})` : "all analyze apps",
+      period,
+      baseline,
+    });
+    await navigator.clipboard.writeText(report);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+
   return (
     <>
       <h1 className="page-title">Analyze 灰度</h1>
@@ -105,6 +124,9 @@ export default function AnalyzeOpsPage() {
         </div>
         <button className="btn small secondary" disabled={loading} onClick={load}>
           {loading ? "Checking" : "Refresh"}
+        </button>
+        <button className="btn small secondary" disabled={!data} onClick={copyReport}>
+          {copied ? "Copied" : "Copy report"}
         </button>
       </div>
 
@@ -352,4 +374,79 @@ function fmtNum(n: number | null): string {
   if (n < 1000) return String(Math.round(n));
   if (n < 1e6) return (n / 1000).toFixed(1) + "k";
   return (n / 1e6).toFixed(1) + "M";
+}
+
+function buildGrayReport(args: {
+  data: AnalyzeGrayData;
+  backlog: AnalyzeBacklogData | null;
+  appName: string;
+  period: Period;
+  baseline: string;
+}): string {
+  const { data, backlog } = args;
+  const gates = Object.entries(data.gates)
+    .map(([key, ok]) => `| ${GATE_LABELS[key] ?? key} | ${ok ? "PASS" : "BLOCK"} | ${gateContext(key, data)} |`)
+    .join("\n");
+  const errors = Object.entries(data.error_codes)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, count]) => `| ${key} | ${count} |`)
+    .join("\n") || "| - | 0 |";
+  const biz = Object.entries(data.by_biz_type)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, count]) => `| ${key} | ${count} |`)
+    .join("\n") || "| - | 0 |";
+  const backlogRows = backlog ? [
+    backlogReportRow("pending", backlog.pending),
+    backlogReportRow("pull_unacked", backlog.pull_unacked),
+    backlogReportRow("callback_undelivered", backlog.callback_undelivered),
+  ].join("\n") : "| - | - | - | - | - | - |";
+
+  return [
+    "# Analyze gray report",
+    "",
+    `- Generated: ${new Date().toISOString()}`,
+    `- App: ${args.appName}`,
+    `- Window: ${args.period} (${data.from} to ${data.to})`,
+    `- IRC baseline p95 ms: ${args.baseline || "-"}`,
+    `- Sample size / limit: ${data.sample_size} / ${data.sample_limit}`,
+    `- Ready for next stage: ${data.ready_for_next_stage ? "YES" : "NO"}`,
+    "",
+    "## Summary",
+    "",
+    `- OK rate: ${pct(data.status.ok_rate)}`,
+    `- Error rate: ${pct(data.status.error_rate)} (${data.status.by_status.error} errors)`,
+    `- Pending older than 5m: ${data.status.pending_older_than_5m}`,
+    `- P95 latency: ${fmtMs(data.latency_ms.p95)} (allowed ${fmtMs(data.baseline.max_allowed_p95_ms)})`,
+    `- Dedup hit rate: ${pct(data.dedup.hit_rate)} (expected >= ${pct(data.dedup.expected_min_hit_rate)})`,
+    `- Pull unacked: ${data.delivery.pull_unacked}`,
+    `- Callback undelivered: ${data.delivery.callback_undelivered}`,
+    "",
+    "## Gates",
+    "",
+    "| Gate | Status | Context |",
+    "| --- | --- | --- |",
+    gates,
+    "",
+    "## Backlog",
+    "",
+    "| Queue | Total | >5m | >30m | >2h | Oldest |",
+    "| --- | ---: | ---: | ---: | ---: | --- |",
+    backlogRows,
+    "",
+    "## biz_type",
+    "",
+    "| biz_type | Count |",
+    "| --- | ---: |",
+    biz,
+    "",
+    "## error_code",
+    "",
+    "| error_code | Count |",
+    "| --- | ---: |",
+    errors,
+  ].join("\n");
+}
+
+function backlogReportRow(label: string, bucket: AnalyzeBacklogBucket): string {
+  return `| ${label} | ${bucket.total} | ${bucket.older_than_5m} | ${bucket.older_than_30m} | ${bucket.older_than_2h} | ${bucket.oldest_at ?? "-"} |`;
 }

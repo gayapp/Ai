@@ -86,7 +86,7 @@ const TASKS: Task[] = [
     id: "ADM-010",
     priority: "P1",
     title: "Roadmap / 任务清单页面",
-    status: "Next",
+    status: "Done",
     reason: "让后续开发计划在后台可见。",
     acceptance: "Admin UI 有 /roadmap，文档有任务清单。",
   },
@@ -94,7 +94,7 @@ const TASKS: Task[] = [
     id: "ADM-011",
     priority: "P1",
     title: "Analyze 灰度报告复制",
-    status: "Next",
+    status: "Done",
     reason: "IRC 升档需要把 gate 结果贴到群或 issue。",
     acceptance: "/analyze-ops 支持复制 Markdown 报告。",
   },
@@ -102,7 +102,7 @@ const TASKS: Task[] = [
     id: "ADM-012",
     priority: "P1",
     title: "审计日志 CSV 导出",
-    status: "Next",
+    status: "Done",
     reason: "方便安全审查和留档。",
     acceptance: "/audit 支持导出当前过滤结果。",
   },
@@ -110,7 +110,7 @@ const TASKS: Task[] = [
     id: "ADM-013",
     priority: "P1",
     title: "Prompt regression set 设计",
-    status: "Next",
+    status: "Done",
     reason: "发布 prompt 前需要固定样本集比对。",
     acceptance: "文档定义样本集格式、保存策略和对比口径。",
   },
@@ -118,7 +118,7 @@ const TASKS: Task[] = [
     id: "ADM-014",
     priority: "P2",
     title: "Prompt regression set 实现",
-    status: "Planned",
+    status: "Done",
     reason: "降低 prompt 发布回归风险。",
     acceptance: "可保存样本集、运行 draft vs active、展示差异。",
   },
@@ -139,12 +139,28 @@ const TASKS: Task[] = [
     acceptance: "/analyze-ops 每个失败 gate 展示对应步骤。",
   },
   {
+    id: "ADM-017",
+    priority: "P2",
+    title: "成本看板",
+    status: "Planned",
+    reason: "按 app / biz / provider 估算 token 成本。",
+    acceptance: "Dashboard 增加成本估算卡片。",
+  },
+  {
+    id: "ADM-018",
+    priority: "P2",
+    title: "Analyze records 导出",
+    status: "Planned",
+    reason: "方便离线对账。",
+    acceptance: "当前过滤条件可导出 CSV。",
+  },
+  {
     id: "INP-001",
     priority: "Input",
     title: "IRC 独立 app 是否创建",
-    status: "Needs input",
+    status: "Done",
     reason: "如果需要隔离“一起看”，应创建独立 IRC app。",
-    acceptance: "用户或 IRC 决定是否切到独立 app_id。",
+    acceptance: "用户已在管理后台创建 IRC app。",
   },
   {
     id: "INP-002",
@@ -167,8 +183,8 @@ const TASKS: Task[] = [
     priority: "Later",
     title: "完整 RBAC",
     status: "Deferred",
-    reason: "当前仍以 ADMIN_TOKEN + 可选 Cloudflare Access 为主。",
-    acceptance: "明确只读、运营、管理员权限模型后再做。",
+    reason: "用户已确认当前不做权限分级。",
+    acceptance: "继续使用统一 ADMIN_TOKEN。",
   },
 ];
 
@@ -190,12 +206,12 @@ export default function RoadmapPage() {
       <div className="card">
         <h3>下一步建议</h3>
         <ol>
-          <li>ADM-011 Analyze 灰度报告复制。</li>
-          <li>ADM-012 审计日志 CSV 导出。</li>
-          <li>ADM-013 Prompt regression set 设计。</li>
+          <li>ADM-015 多环境明显标识。</li>
+          <li>ADM-016 灰度 runbook 内嵌。</li>
+          <li>ADM-018 Analyze records 导出。</li>
         </ol>
         <div className="muted" style={{ fontSize: 12 }}>
-          如果 IRC 灰度已经开始，优先 ADM-011。若还在准备接入，优先 ADM-013。
+          ADM-011 到 ADM-014 已完成；IRC app 已创建，当前不做权限分级。
         </div>
       </div>
 
