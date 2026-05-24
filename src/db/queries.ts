@@ -372,7 +372,7 @@ export async function listModeration(
   opts: {
     app_id?: string;
     biz_type?: BizType;
-    status?: Status;
+    status?: Status | "pending";
     from_ms?: number;
     to_ms?: number;
     limit?: number;

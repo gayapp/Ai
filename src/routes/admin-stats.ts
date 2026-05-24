@@ -253,7 +253,7 @@ adminStatsRouter.get("/requests", async (c) => {
   const { items, nextCursor } = await listModeration(c.env.DB, {
     app_id: c.req.query("app_id"),
     biz_type: bizParam ? BizType.parse(bizParam) : undefined,
-    status: statusParam ? Status.parse(statusParam) : undefined,
+    status: statusParam ? parseAdminModerationStatus(statusParam) : undefined,
     from_ms,
     to_ms,
     limit,
@@ -283,6 +283,11 @@ adminStatsRouter.get("/requests", async (c) => {
     next_cursor: nextCursor,
   });
 });
+
+function parseAdminModerationStatus(raw: string): Status | "pending" {
+  if (raw === "pending") return "pending";
+  return Status.parse(raw);
+}
 
 adminStatsRouter.get("/requests/:id", async (c) => {
   const id = c.req.param("id");

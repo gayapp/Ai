@@ -331,6 +331,8 @@ Query：`biz_type`、`provider`、`limit`。
 
 返回数组，每条是审核记录的摘要。`limit` ≤ 500。
 
+`status` 支持 `pass` / `reject` / `review` / `error` / `pending`。其中 `pending` 仅用于 admin 排障可见性，不进入 `/v1/moderate` 公开回调契约。
+
 ### `GET /admin/stats/requests/:id` — 单条完整详情
 
 返回该请求的所有字段，含 `content_hash` / `prompt_version` / `tokens` / `extra` / `mode` / `error_code` 等。仅 admin 可见，不需要应用 HMAC。
