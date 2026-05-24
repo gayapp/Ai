@@ -32,6 +32,7 @@ import { resolveRoute } from "./providers/router.ts";
 import { CachedResult } from "./moderation/schema.ts";
 import { processCallback } from "./callback/dispatcher.ts";
 import { saveAvatarEvidence } from "./evidence/r2.ts";
+import { sweepModerationPending } from "./moderation/pending-sweep.ts";
 import { rollupYesterday } from "./stats/rollup.ts";
 import { dispatchAnalyzeJob } from "./analyze/pipeline/dispatcher.ts";
 import type { AnalyzeJob } from "./analyze/types.ts";
@@ -304,18 +305,12 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
   // （防止 Worker 被意外终止留下残单）
   if (cron === "*/5 * * * *") {
     try {
-      const cutoff = Date.now() - 5 * 60 * 1000;
-      const r = await env.DB.prepare(
-        `UPDATE moderation_requests
-         SET status='error', error_code='pending_timeout',
-             reason='Worker 未完成（sweep）', completed_at=?
-         WHERE status='pending' AND created_at < ?`,
-      )
-        .bind(Date.now(), cutoff)
-        .run();
-      const changes = (r.meta as { changes?: number } | undefined)?.changes ?? 0;
-      if (changes > 0) {
-        console.log(`[scheduled] sweep: marked ${changes} pending rows as error`);
+      const r = await sweepModerationPending(env);
+      if (r.swept > 0) {
+        console.log(
+          `[scheduled] sweep: marked ${r.swept} pending rows as error, ` +
+          `callback_enqueued=${r.callbackEnqueued}, alert_sent=${r.alertSent}`,
+        );
       }
     } catch (e) {
       console.warn("[scheduled] sweep failed", e);

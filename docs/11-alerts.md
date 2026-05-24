@@ -6,6 +6,7 @@
 |------|------|------|
 | 错误率 | ≥ 5% | warn（≥20% → crit） |
 | 最高延迟 | ≥ 15s | warn |
+| moderate pending 超时 | > 5 分钟 | sweep 标记为 `error/pending_timeout`，补投 callback，Telegram warn/crit |
 | 时间窗口 | 最近 5 分钟 | 滚动检查 |
 | 最小样本 | 20 条请求 | 低于不判定 |
 | 去重 | 同类型 5 分钟内不重发 | 防刷屏 |
@@ -20,6 +21,7 @@
 
 触发频率：
 - Cron `*/5 * * * *` — 错误率/延迟检查
+- Cron `*/5 * * * *` — moderate pending sweep：把 >5 分钟未完成的请求标记为 `error/pending_timeout`，重新入队 callback，并发送 Telegram
 - Cron 每小时整点 — provider 健康巡检（`checkProviderHealth`）
 - 实时 — Provider 返回 401/403 时 pipeline 立即 `alertProviderAuthFailed`
 
@@ -27,6 +29,7 @@
 阈值代码：
 - [src/alerts/telegram.ts](../src/alerts/telegram.ts) · 错误率/延迟
 - [src/alerts/provider-health.ts](../src/alerts/provider-health.ts) · key 状态
+- [src/moderation/pending-sweep.ts](../src/moderation/pending-sweep.ts) · moderate pending 超时扫尾
 
 ## 邮件通知（可选 · 当前未启用）
 
@@ -97,6 +100,25 @@ wrangler secret put TELEGRAM_CHAT_ID --env dev
 排查: https://aicenter.1.gay/#/requests?status=error
 
 _2026-04-23T15:30:00.000Z_
+```
+
+## pending timeout 消息样例
+
+```
+⚠️ *ai-guard · moderate pending 超时*
+超时请求数: 2
+阈值: pending > 5 分钟
+最老请求年龄: 8 分钟
+callback 补投: 2
+callback 入队失败: 0
+
+样本 request_id:
+- 019e55c0-2725-7434-a3db-b4c01c251c6b
+
+后台处理: https://aicenter.1.gay/#/requests?status=error
+当前 pending: https://aicenter.1.gay/#/requests?status=pending
+
+_2026-05-24T14:20:00.000Z_
 ```
 
 ## 手动触发（运维排查用）

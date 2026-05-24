@@ -70,7 +70,26 @@ curl -X POST https://aicenter-api.1.gay/admin/alerts/check \
    - 签名算法不匹配 → 核对 [docs/04](04-callback-spec.md)。
 3. 修复后 Admin UI → Callbacks 页批量 retry，或 `wrangler queues dlq retry`。
 
-### ③ D1 写入慢
+### ③ moderate pending timeout
+
+**症状**：Telegram 收到 `ai-guard · moderate pending 超时`，或 Admin UI `/requests` 中出现 `error_code=pending_timeout`。
+
+**系统自动动作**：
+
+1. Cron 每 5 分钟扫描 `moderation_requests.status='pending'` 且创建时间超过 5 分钟的请求。
+2. 将其标记为 `status=error`、`error_code=pending_timeout`、`reason=Worker 未完成（sweep）`。
+3. 重新投递 callback 队列，让接入方收到最终 `error` 回调。
+4. 发送 Telegram 告警，附带样本 `request_id` 和后台链接。
+
+**管理后台处理**：
+
+1. 打开 Admin UI → `/requests?status=error`，找到 `reason=Worker 未完成（sweep）` 或详情里的 `error_code=pending_timeout`。
+2. 再打开 `/requests?status=pending`，确认是否还有未完成积压。
+3. 如果 `pending=0` 且只有少数历史 `pending_timeout`：通常是 Worker/Queue 短暂中断，观察即可。
+4. 如果持续新增：检查 `wrangler tail`、Queue consumer、provider circuit、最近部署版本，并临时通知接入方关注 error callback。
+5. 对文本类记录可在详情页使用 replay 评估当前 provider/prompt 是否正常；replay 不会改写原记录。
+
+### ④ D1 写入慢
 
 **症状**：P95 飙高、`d1_query_error` 日志。
 
@@ -79,7 +98,7 @@ curl -X POST https://aicenter-api.1.gay/admin/alerts/check \
 2. 检查热写表索引（`moderation_requests`）。
 3. 考虑把写操作移到 Queue（异步落库）。
 
-### ④ KV 缓存污染
+### ⑤ KV 缓存污染
 
 **症状**：改了 prompt 但线上仍走旧结果。
 
@@ -94,14 +113,14 @@ wrangler kv key list --binding=DEDUP_CACHE --env prod --prefix "comment:" | \
 ```
 ⚠️ 会短期拉高 token 成本，仅应急。
 
-### ⑤ 密钥泄漏
+### ⑥ 密钥泄漏
 
 **处置**：
 1. Admin UI → Apps → 该 app → "轮换密钥"。
 2. 新密钥给应用方，**老密钥立即失效**（`APPS` KV 立刻更新 hash）。
 3. 在 `moderation_requests` 里排查该 `app_id` 最近 24h 可疑请求（大量拒绝 / 异常 user_id）。
 
-### ⑥ 生产部署回滚
+### ⑦ 生产部署回滚
 
 ```bash
 wrangler rollback --env prod                    # 上一个版本
