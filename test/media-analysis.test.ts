@@ -421,6 +421,47 @@ describe("media_analysis pipeline", () => {
     expect(countFetches(fetchMock, "api.x.ai")).toBe(1);
   });
 
+  it("falls back to xAI when Gemini returns an empty response", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const db = new FakeD1();
+    db.rows.push(makeRow("r1"));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("cdn.example.com")) return imageResponse();
+      if (url.includes("generativelanguage.googleapis.com")) {
+        return Response.json({ candidates: [{ content: { parts: [{ text: "" }] } }] });
+      }
+      if (url.includes("api.x.ai")) return xaiResponse();
+      return new Response("unexpected url", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await dispatchAnalyzeJob({
+      DB: db,
+      NONCE: new MemKV(),
+      PROMPTS: new MemKV(),
+      DEDUP_CACHE: new MemKV(),
+      CALLBACK_QUEUE: new MemQueue<object>(),
+      GEMINI_API_KEY: "key",
+      GEMINI_MODEL: "gemini-test",
+      GROK_API_KEY: "grok-key",
+      GROK_MEDIA_MODEL: "grok-test",
+      DEDUP_TTL_SECONDS: "604800",
+    } as unknown as Env, {
+      request_id: "r1",
+      app_id: "app_a",
+      biz_type: "media_analysis",
+      created_at_ms: Date.now(),
+    });
+
+    expect(db.rows[0]).toMatchObject({
+      status: "ok",
+      provider: "xai",
+      error_code: null,
+    });
+    expect(countFetches(fetchMock, "generativelanguage.googleapis.com")).toBe(1);
+    expect(countFetches(fetchMock, "api.x.ai")).toBe(1);
+  });
+
   it("uses xAI first when the app provider strategy is grok", async () => {
     const db = new FakeD1();
     const apps = new MemKV();
@@ -605,7 +646,7 @@ describe("media_analysis pipeline", () => {
 
   it("normalizes wrapped and loose provider JSON into the public output schema", async () => {
     const { db } = await dispatchWithGeminiResponse(Response.json({
-      candidates: [{ content: { parts: [{ text: JSON.stringify({
+      candidates: [{ content: { parts: [{ text: `Here is the JSON:\n${JSON.stringify({
         analysis: {
           moderation: { decision: "approve", confidence: 1, summary: "ok", violations: [] },
           tags: { summary: "tags" },
@@ -619,17 +660,18 @@ describe("media_analysis pipeline", () => {
           }],
           score: 87.9,
           scoring_breakdown: { visual: 0.7, ignored: "bad" },
-          cover_candidates: [{
+          description: { bad: true },
+          cover_candidates: {
             frame_index: 2.5,
             timestamp_seconds: 8.1,
             score: 101,
             scoring_breakdown: { sharpness: 0.8 },
             reason: "clear",
-          }],
+          },
           trial: { trial_start_seconds: 1.2, trial_end_seconds: 8.7, trial_score: 2 },
-          frame_notes: [{ frame_index: 1.4, timestamp_seconds: 4.2, summary: "note" }],
+          frame_notes: "bad",
         },
-      }) }] } }],
+      })}\nThanks.` }] } }],
       usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20 },
     }));
 
@@ -640,10 +682,12 @@ describe("media_analysis pipeline", () => {
     expect(JSON.parse(db.rows[0]!.result_json ?? "{}")).toMatchObject({
       region: { code: "other", confidence: 1 },
       face_coordinates: [{ box: { x: 1, y: 2, width: 50, height: 60 }, orientation: "unknown" }],
+      description: "",
       score: 87,
       scoring_breakdown: { visual: 0.7 },
-      cover_candidates: [{ frame_index: 2, score: 100, is_recommended: false }],
+      cover_candidates: [],
       trial: { trial_start_seconds: 1, trial_end_seconds: 8, trial_score: 1, status: "pending" },
+      frame_notes: [],
     });
   });
 });

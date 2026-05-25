@@ -323,22 +323,13 @@ function parseInput(raw: string): MediaAnalysisInputT {
 
 function parseOutput(raw: string): MediaAnalysisOutputT {
   if (!raw) {
-    throw new AppError(ErrorCodes.SCHEMA_VALIDATION_FAILED, 500, "empty provider output");
+    throw new AppError(ErrorCodes.PROVIDER_ERROR, 502, "empty provider output");
   }
   let text = raw.trim();
   if (text.startsWith("```")) {
     text = text.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "").trim();
   }
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch (e) {
-    throw new AppError(
-      ErrorCodes.SCHEMA_VALIDATION_FAILED,
-      500,
-      `invalid provider JSON: ${e instanceof Error ? e.message : String(e)}`,
-    );
-  }
+  const json = parseProviderJson(text);
   const parsed = MediaAnalysisOutput.safeParse(normalizeMediaAnalysisOutput(json));
   if (!parsed.success) {
     throw new AppError(ErrorCodes.SCHEMA_VALIDATION_FAILED, 500, parsed.error.message);
@@ -373,14 +364,17 @@ function normalizeMediaAnalysisOutput(value: unknown): unknown {
     ? out.face_coordinates.map(normalizeFaceCoordinate)
     : [];
   out.region = normalizeRegion(out.region);
+  if ("description" in out) out.description = stringOr(out.description, "");
   if ("score" in out) out.score = integerInRange(out.score, 0, 0, 100);
   if ("scoring_breakdown" in out) out.scoring_breakdown = numericRecordOr(out.scoring_breakdown);
-  if (Array.isArray(out.cover_candidates)) {
-    out.cover_candidates = out.cover_candidates.slice(0, 5).map(normalizeCoverCandidate);
+  if ("cover_candidates" in out) {
+    out.cover_candidates = Array.isArray(out.cover_candidates)
+      ? out.cover_candidates.slice(0, 5).map(normalizeCoverCandidate)
+      : [];
   }
   if ("trial" in out) out.trial = normalizeTrial(out.trial);
-  if (Array.isArray(out.frame_notes)) {
-    out.frame_notes = out.frame_notes.map(normalizeFrameNote);
+  if ("frame_notes" in out) {
+    out.frame_notes = Array.isArray(out.frame_notes) ? out.frame_notes.map(normalizeFrameNote) : [];
   }
   return out;
 }
@@ -415,8 +409,12 @@ function normalizeViolation(value: unknown): Record<string, unknown> {
     detected: typeof src.detected === "boolean" ? src.detected : true,
     confidence: numberInRange(src.confidence, 0, 0, 1),
     evidence: stringOr(src.evidence, ""),
-    ...(typeof src.frame_index === "number" ? { frame_index: src.frame_index } : {}),
-    ...(typeof src.timestamp_seconds === "number" ? { timestamp_seconds: src.timestamp_seconds } : {}),
+    ...(typeof src.frame_index === "number"
+      ? { frame_index: integerInRange(src.frame_index, 0, 0, Number.MAX_SAFE_INTEGER) }
+      : {}),
+    ...(typeof src.timestamp_seconds === "number"
+      ? { timestamp_seconds: numberInRange(src.timestamp_seconds, 0, 0, Number.MAX_SAFE_INTEGER) }
+      : {}),
   };
 }
 
@@ -548,6 +546,56 @@ function numericRecordOr(value: unknown): Record<string, number> {
     }
   }
   return out;
+}
+
+function parseProviderJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (e) {
+    const extracted = extractFirstJsonObject(text);
+    if (extracted) {
+      try {
+        return JSON.parse(extracted) as unknown;
+      } catch {
+        // fall through to the original parse error for a clearer message
+      }
+    }
+    throw new AppError(
+      ErrorCodes.SCHEMA_VALIDATION_FAILED,
+      500,
+      `invalid provider JSON: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+}
+
+function extractFirstJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+    } else if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
 }
 
 function mediaAnalysisDedupKey(promptVersion: number, inputHash: string): string {

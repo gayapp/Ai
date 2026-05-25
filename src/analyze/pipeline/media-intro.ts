@@ -264,7 +264,7 @@ async function tryMediaIntroProvider(
 
 function parseOutput(raw: string): MediaIntroOutputT {
   if (!raw) {
-    throw new AppError(ErrorCodes.SCHEMA_VALIDATION_FAILED, 500, "empty provider output");
+    throw new AppError(ErrorCodes.PROVIDER_ERROR, 502, "empty provider output");
   }
   let text = raw.trim();
   if (text.startsWith("```")) {
