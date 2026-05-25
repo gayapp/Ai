@@ -196,6 +196,8 @@ function sign(secret, body) {
 
 `image_urls` 必须是 1..16 张 `https://` 图片 URL。`image_urls.length === 1` 表示单图分析；`image_urls.length > 1` 表示视频帧分析。两者共用 `media_analysis`，result 字段差异见 [12-content-service.md](12-content-service.md#5-media_analysis-schema)。
 
+`frame_metadata[].quality_score` 可传归一化分数 `0..1`，也可传 IRC 帧提取阶段的非负原始质量分；平台只把它作为帧质量 hint 传给模型，含义是数值越大质量越高。
+
 ### `media_intro` input
 
 ```json

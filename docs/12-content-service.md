@@ -98,7 +98,7 @@ pull 接口：
   duration_seconds?: number;         // 视频时长，仅视频时填
   frame_metadata?: {
     timestamp_seconds: number;
-    quality_score: number;           // 0..1
+    quality_score: number;           // 非负质量分；可为 0..1 归一化分或 IRC 原始质量分
     scene_id?: number;
   }[];
   region_hint?: string;

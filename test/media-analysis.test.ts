@@ -98,6 +98,21 @@ describe("MediaAnalysis schema", () => {
     }).success).toBe(false);
   });
 
+  it("accepts raw non-negative frame quality scores from IRC", () => {
+    expect(MediaAnalysisInput.safeParse({
+      image_urls: ["https://cdn.example.com/1.jpg"],
+      frame_metadata: [
+        { timestamp_seconds: 12.5, quality_score: 184.5093, scene_id: 1 },
+      ],
+    }).success).toBe(true);
+    expect(MediaAnalysisInput.safeParse({
+      image_urls: ["https://cdn.example.com/1.jpg"],
+      frame_metadata: [
+        { timestamp_seconds: 12.5, quality_score: -1, scene_id: 1 },
+      ],
+    }).success).toBe(false);
+  });
+
   it("accepts the RFC superset output shape", () => {
     expect(MediaAnalysisOutput.safeParse(sampleOutput()).success).toBe(true);
     expect(MediaAnalysisOutput.safeParse({

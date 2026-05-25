@@ -6,7 +6,7 @@ export const MediaAnalysisInput = z.object({
   duration_seconds: z.number().int().nonnegative().optional(),
   frame_metadata: z.array(z.object({
     timestamp_seconds: z.number().nonnegative(),
-    quality_score: z.number().min(0).max(1),
+    quality_score: z.number().nonnegative(),
     scene_id: z.number().int().optional(),
   })).optional(),
   region_hint: z.string().optional(),
