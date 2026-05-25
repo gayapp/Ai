@@ -12,7 +12,7 @@ import { BoolPill, ProviderPill, StatusPill } from "../components/common";
 const BIZ = ["", "media_analysis", "media_intro"];
 const STATUS = ["", "pending", "ok", "error"];
 const DELIVERY = ["", "callback", "pull", "both"];
-const PERIODS = ["1h", "24h", "7d"] as const;
+const PERIODS = ["1h", "24h", "7d", "all"] as const;
 type Period = typeof PERIODS[number];
 
 export default function AnalyzeRecordsPage() {
@@ -46,7 +46,7 @@ export default function AnalyzeRecordsPage() {
     setBizIdInput(params.get("biz_id") ?? "");
     setStatus(params.get("status") ?? "");
     setDelivery(params.get("delivery_mode") ?? "");
-    if (nextPeriod === "1h" || nextPeriod === "24h" || nextPeriod === "7d") {
+    if (nextPeriod === "1h" || nextPeriod === "24h" || nextPeriod === "7d" || nextPeriod === "all") {
       setPeriod(nextPeriod);
     }
   }, [location.search]);
@@ -230,7 +230,8 @@ export default function AnalyzeRecordsPage() {
   );
 }
 
-function periodRange(period: Period): { from: string; to: string } {
+function periodRange(period: Period): { from?: string; to?: string } {
+  if (period === "all") return {};
   const hours = period === "1h" ? 1 : period === "24h" ? 24 : 24 * 7;
   const now = Date.now();
   return {
