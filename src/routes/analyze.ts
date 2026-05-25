@@ -73,7 +73,14 @@ analyzeRouter.post("/v1/analyze", async (c) => {
     const context: MediaIntroExecutionContext = { provider: null, promptVersion: null };
     const timeoutMs = parseInt(c.env.SYNC_TIMEOUT_MS || "10000", 10);
     try {
-      const run = await runMediaIntro(c.env, inputHash, mediaIntroInput!, timeoutMs, context);
+      const run = await runMediaIntro(
+        c.env,
+        inputHash,
+        mediaIntroInput!,
+        timeoutMs,
+        context,
+        app.provider_strategy,
+      );
       await completeMediaIntroOk(c.env, requestId, run);
       await cacheMediaIntro(c.env, run);
       return c.json({

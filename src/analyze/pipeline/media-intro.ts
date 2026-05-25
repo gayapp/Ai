@@ -18,6 +18,7 @@ import {
   type MediaIntroOutputT,
 } from "../schema/media-intro.ts";
 import type { AnalyzeProvider, AnalyzeRow } from "../types.ts";
+import type { ProviderStrategy } from "../../moderation/types.ts";
 
 type MediaIntroProvider = Extract<AnalyzeProvider, "gemini" | "xai">;
 
@@ -49,11 +50,12 @@ export async function executeMediaIntro(
   env: Env,
   row: AnalyzeRow,
   timeoutMs = 90_000,
+  strategy: ProviderStrategy = "auto",
 ): Promise<void> {
   const context: MediaIntroExecutionContext = { provider: null, promptVersion: null };
   try {
     const input = parseMediaIntroInput(row.input_json);
-    const run = await runMediaIntro(env, row.input_hash, input, timeoutMs, context);
+    const run = await runMediaIntro(env, row.input_hash, input, timeoutMs, context, strategy);
     await completeMediaIntroOk(env, row.id, run);
     await cacheMediaIntro(env, run);
   } catch (e) {
@@ -69,8 +71,9 @@ export async function runMediaIntro(
   input: MediaIntroInputT,
   timeoutMs: number,
   context: MediaIntroExecutionContext = { provider: null, promptVersion: null },
+  strategy: ProviderStrategy = "auto",
 ): Promise<MediaIntroRun> {
-  const route = resolveAnalyzeRoute("media_intro");
+  const route = resolveAnalyzeRoute("media_intro", strategy);
   const primary = toMediaIntroProvider(route.primary);
   const fallback = route.fallback ? toMediaIntroProvider(route.fallback) : null;
   const primaryCanTry = await canTry(env.NONCE, primary, "media_intro");

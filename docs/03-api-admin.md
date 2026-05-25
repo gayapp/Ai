@@ -34,8 +34,8 @@ Authorization: Bearer <ADMIN_TOKEN>
 
 | 值 | moderate 文本 | moderate 头像 | analyze | 说明 |
 |----|-------------|------|------|------|
-| `auto`（默认） | Grok | Gemini | 按 analyze 路由选择 xAI / Gemini | 平台默认路由 |
-| `grok` | Grok | Gemini | analyze 不使用 Grok，按默认 analyze 路由降级 | moderate 文本优先 Grok |
+| `auto`（默认） | Grok | Gemini | 按 analyze 默认路由选择 xAI / Gemini | 平台默认路由 |
+| `grok` | Grok | Gemini | xAI / Grok 优先，失败按 analyze fallback | moderate 文本与 analyze 尽量优先 xAI |
 | `gemini` | Gemini | Gemini | Gemini 优先，失败按 analyze fallback | 所有可用场景尽量优先 Gemini |
 | `round_robin` | 每秒切换 | Gemini | xAI / Gemini 轮换 | 基于 `Date.now()/1000 % 2` 决定本次主 |
 

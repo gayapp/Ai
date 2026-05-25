@@ -13,6 +13,7 @@ import { completeAnalyze } from "../../db/analyze-requests.ts";
 import { callGeminiMediaAnalysis } from "../providers/gemini-media.ts";
 import { callXaiMediaAnalysis } from "../providers/xai-media.ts";
 import { resolveAnalyzeRoute } from "../../providers/router.ts";
+import type { ProviderStrategy } from "../../moderation/types.ts";
 import {
   canTry,
   recordAuthFailure,
@@ -46,11 +47,15 @@ interface MediaAnalysisRun {
   latencyMs: number;
 }
 
-export async function executeMediaAnalysis(env: Env, row: AnalyzeRow): Promise<void> {
+export async function executeMediaAnalysis(
+  env: Env,
+  row: AnalyzeRow,
+  strategy: ProviderStrategy = "auto",
+): Promise<void> {
   const context: ExecutionContext = { provider: null, promptVersion: null };
   try {
     const input = parseInput(row.input_json);
-    const run = await runMediaAnalysisRoute(env, row.input_hash, input, context);
+    const run = await runMediaAnalysisRoute(env, row.input_hash, input, context, strategy);
     if (run.cached) {
       await completeAnalyze(env.DB, {
         id: row.id,
@@ -119,8 +124,9 @@ async function runMediaAnalysisRoute(
   inputHash: string,
   input: MediaAnalysisInputT,
   context: ExecutionContext,
+  strategy: ProviderStrategy,
 ): Promise<MediaAnalysisRun> {
-  const route = resolveAnalyzeRoute("media_analysis");
+  const route = resolveAnalyzeRoute("media_analysis", strategy);
   const primary = toMediaAnalysisProvider(route.primary);
   const fallback = route.fallback ? toMediaAnalysisProvider(route.fallback) : null;
   const primaryCanTry = await canTry(env.NONCE, primary, "media_analysis");
