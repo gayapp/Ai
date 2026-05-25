@@ -94,7 +94,7 @@ pull 接口：
 ```ts
 {
   image_urls: string[];              // 必填，1..16 张 https:// URL
-  title?: string;                    // 资源标题 hint
+  title?: string;                    // 资源标题 hint，最大 2048 字符
   duration_seconds?: number;         // 视频时长，仅视频时填
   frame_metadata?: {
     timestamp_seconds: number;
@@ -197,7 +197,7 @@ pull 接口：
 
 ```ts
 {
-  title: string;
+  title: string;                      // 最大 2048 字符
   duration_seconds?: number;
   tags?: string[];
   frame_notes?: { timestamp_seconds: number; summary: string }[];

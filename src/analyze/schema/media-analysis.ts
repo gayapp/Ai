@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const MediaAnalysisInput = z.object({
   image_urls: z.array(z.string().url().startsWith("https://")).min(1).max(16),
-  title: z.string().max(512).optional(),
+  title: z.string().max(2048).optional(),
   duration_seconds: z.number().int().nonnegative().optional(),
   frame_metadata: z.array(z.object({
     timestamp_seconds: z.number().nonnegative(),

@@ -113,6 +113,17 @@ describe("MediaAnalysis schema", () => {
     }).success).toBe(false);
   });
 
+  it("accepts long IRC resource titles as bounded hints", () => {
+    expect(MediaAnalysisInput.safeParse({
+      image_urls: ["https://cdn.example.com/1.jpg"],
+      title: "x".repeat(2048),
+    }).success).toBe(true);
+    expect(MediaAnalysisInput.safeParse({
+      image_urls: ["https://cdn.example.com/1.jpg"],
+      title: "x".repeat(2049),
+    }).success).toBe(false);
+  });
+
   it("accepts the RFC superset output shape", () => {
     expect(MediaAnalysisOutput.safeParse(sampleOutput()).success).toBe(true);
     expect(MediaAnalysisOutput.safeParse({

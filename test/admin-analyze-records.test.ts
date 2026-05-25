@@ -19,6 +19,14 @@ class FakeD1 {
   }
 }
 
+class MemQueue<T> {
+  readonly messages: T[] = [];
+
+  async send(message: T): Promise<void> {
+    this.messages.push(message);
+  }
+}
+
 class FakeStmt {
   private args: unknown[] = [];
   constructor(private readonly db: FakeD1, private readonly sql: string) {}
@@ -58,10 +66,45 @@ class FakeStmt {
     }
     return null;
   }
+  async run(): Promise<D1Result> {
+    if (this.sql.includes("INSERT INTO analyze_requests")) {
+      this.db.rows.push({
+        id: String(this.args[0]),
+        app_id: String(this.args[1]),
+        biz_type: String(this.args[2]),
+        biz_id: String(this.args[3]),
+        user_id: this.args[4] === null ? null : String(this.args[4]),
+        input_hash: String(this.args[5]),
+        input_json: String(this.args[6]),
+        prompt_version: null,
+        provider: null,
+        model: null,
+        mode: String(this.args[7]),
+        cached: 0,
+        status: "pending",
+        result_json: null,
+        input_tokens: 0,
+        output_tokens: 0,
+        latency_ms: 0,
+        error_code: null,
+        delivery_mode: String(this.args[8]),
+        callback_url: this.args[9] === null ? null : String(this.args[9]),
+        extra_json: this.args[10] === null ? null : String(this.args[10]),
+        delivered_at: null,
+        acked_at: null,
+        created_at: Number(this.args[11]),
+        completed_at: null,
+      });
+    }
+    return { success: true } as D1Result;
+  }
 
   private filteredRows(): AnalyzeRow[] {
     let arg = 0;
     let rows = [...this.db.rows];
+    if (this.sql.includes("r.status = 'error'")) {
+      rows = rows.filter((r) => r.status === "error");
+    }
     if (this.sql.includes("app_id = ?")) {
       const value = this.args[arg++];
       rows = rows.filter((r) => r.app_id === value);
@@ -93,6 +136,24 @@ class FakeStmt {
     if (this.sql.includes("id < ?")) {
       const value = String(this.args[arg++]);
       rows = rows.filter((r) => r.id < value);
+    }
+    if (this.sql.includes("newer_error")) {
+      rows = rows.filter((r) => !this.db.rows.some((candidate) =>
+        candidate.app_id === r.app_id &&
+        candidate.biz_type === r.biz_type &&
+        candidate.biz_id === r.biz_id &&
+        candidate.status === "error" &&
+        candidate.created_at > r.created_at
+      ));
+    }
+    if (this.sql.includes("newer_ok")) {
+      rows = rows.filter((r) => !this.db.rows.some((candidate) =>
+        candidate.app_id === r.app_id &&
+        candidate.biz_type === r.biz_type &&
+        candidate.biz_id === r.biz_id &&
+        candidate.status === "ok" &&
+        candidate.created_at > r.created_at
+      ));
     }
     return rows;
   }
@@ -239,6 +300,73 @@ describe("admin analyze records", () => {
     expect(body.pull_unacked).toMatchObject({ total: 1, older_than_5m: 1 });
     expect(body.callback_undelivered).toMatchObject({ total: 1, older_than_2h: 1 });
   });
+
+  it("reprocesses latest failed analyze records without replacing audit rows", async () => {
+    const now = Date.now();
+    const rows = [
+      makeRow("r004", "media_analysis", "video-ok-later", "ok", { summary: "done" }, {
+        created_at: now,
+        error_code: null,
+      }),
+      makeRow("r003", "media_analysis", "video-ok-later", "error", null, {
+        created_at: now - 1000,
+        error_code: "schema_validation_failed",
+      }),
+      makeRow("r002", "media_analysis", "video-failed", "error", null, {
+        created_at: now - 500,
+        error_code: "schema_validation_failed",
+      }),
+      makeRow("r001", "media_analysis", "video-failed", "error", null, {
+        created_at: now - 2000,
+        error_code: "schema_validation_failed",
+      }),
+    ];
+    const app = makeApp();
+    const queue = new MemQueue<object>();
+    const env = makeEnv(rows, queue);
+    const headers = adminHeaders();
+    headers.set("content-type", "application/json");
+    const res = await app.fetch(new Request("http://local/admin/analyze-records/reprocess", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        app_id: "app_a",
+        error_code: "schema_validation_failed",
+        limit: 10,
+      }),
+    }), env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      selected: number;
+      enqueued: number;
+      items: Array<{ original_request_id: string; request_id: string; biz_id: string }>;
+    };
+    expect(body.selected).toBe(1);
+    expect(body.enqueued).toBe(1);
+    expect(body.items[0]).toMatchObject({
+      original_request_id: "r002",
+      biz_id: "video-failed",
+    });
+    expect(queue.messages).toHaveLength(1);
+
+    const created = rows.find((r) => r.id === body.items[0].request_id);
+    expect(created).toMatchObject({
+      app_id: "app_a",
+      biz_type: "media_analysis",
+      biz_id: "video-failed",
+      mode: "async",
+      status: "pending",
+      delivery_mode: "both",
+      callback_url: "https://consumer.example.com/analyze",
+    });
+    expect(JSON.parse(created?.extra_json ?? "{}")).toMatchObject({
+      trace_id: "r002",
+      reprocess: {
+        original_request_id: "r002",
+        original_error_code: "schema_validation_failed",
+      },
+    });
+  });
 });
 
 function makeBacklogRow(rows: AnalyzeRow[]) {
@@ -310,9 +438,10 @@ function makeApp(): Hono<{ Bindings: Env }> {
   return app;
 }
 
-function makeEnv(rows?: AnalyzeRow[]): Env {
+function makeEnv(rows?: AnalyzeRow[], queue = new MemQueue<object>()): Env {
   return {
     DB: new FakeD1(rows),
+    ANALYZE_QUEUE: queue,
     ADMIN_TOKEN: "admin-token",
   } as unknown as Env;
 }

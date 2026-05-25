@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const MediaIntroInput = z.object({
-  title: z.string().min(1).max(512),
+  title: z.string().min(1).max(2048),
   duration_seconds: z.number().int().nonnegative().optional(),
   tags: z.array(z.string()).optional(),
   frame_notes: z.array(z.object({

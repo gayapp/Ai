@@ -128,6 +128,8 @@ afterEach(() => {
 describe("MediaIntro schema", () => {
   it("validates input and output boundaries", () => {
     expect(MediaIntroInput.safeParse({ title: "Video title", max_length: 120 }).success).toBe(true);
+    expect(MediaIntroInput.safeParse({ title: "x".repeat(2048), max_length: 120 }).success).toBe(true);
+    expect(MediaIntroInput.safeParse({ title: "x".repeat(2049), max_length: 120 }).success).toBe(false);
     expect(MediaIntroInput.safeParse({ title: "", max_length: 120 }).success).toBe(false);
     expect(MediaIntroInput.safeParse({ title: "Video title", max_length: 20 }).success).toBe(false);
     expect(MediaIntroOutput.safeParse(sampleIntro()).success).toBe(true);

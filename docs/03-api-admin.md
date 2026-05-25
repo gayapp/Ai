@@ -385,6 +385,61 @@ Query：`biz_type`、`provider`、`limit`。
 
 用于 IRC 按 `request_id` 或 `biz_id` 对账。完整接入方 pull 契约见 [14-analyze-records.md](14-analyze-records.md)。
 
+### `POST /admin/analyze-records/reprocess`
+
+将历史失败 analyze 记录重新入队。旧记录保留作审计，接口会基于原 `input_json` 新建一条 `status=pending` 的 analyze request，并投递 `ANALYZE_QUEUE`。
+
+**Request**
+
+```json
+{
+  "app_id": "app_xxx",
+  "biz_type": "media_analysis",
+  "error_code": "schema_validation_failed",
+  "from": "2026-05-25T00:00:00Z",
+  "to": "2026-05-26T00:00:00Z",
+  "limit": 200,
+  "cursor": null,
+  "dry_run": true,
+  "latest_per_biz": true,
+  "only_without_later_ok": true
+}
+```
+
+字段说明：
+
+- `limit` 最大 200，用 `next_cursor` 分批处理。
+- `dry_run=true` 只返回候选集，不写入新记录、不入队。
+- `latest_per_biz=true` 默认只选同一 `(app_id,biz_type,biz_id)` 的最新失败记录。
+- `only_without_later_ok=true` 默认跳过已经有更新 `ok` 记录的业务对象。
+
+**Response**
+
+```json
+{
+  "dry_run": false,
+  "selected": 1,
+  "enqueued": 1,
+  "skipped": 0,
+  "next_cursor": null,
+  "items": [
+    {
+      "original_request_id": "019...",
+      "request_id": "019...",
+      "biz_id": "irc_task_123",
+      "error_code": "schema_validation_failed"
+    }
+  ],
+  "skipped_items": []
+}
+```
+
+运维建议：
+
+- `schema_validation_failed` 等平台修复后可恢复的错误，可用本接口分批重跑。
+- `unsupported_content` 若源于 IRC 帧图 URL 已过期或桶路径错误，不建议直接重跑原记录；IRC 应重新生成有效 URL 并提交新 request。
+- 新记录的 `extra.reprocess` 会记录 `original_request_id` / `original_error_code` / `requested_at`，便于对账。
+
 ---
 
 ## Providers（模型与熔断状态）

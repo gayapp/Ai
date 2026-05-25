@@ -12,6 +12,18 @@ export interface ListAdminAnalyzeArgs {
   cursor?: string;
 }
 
+export interface ListAnalyzeReprocessCandidatesArgs {
+  app_id?: string;
+  biz_type?: AnalyzeBizType;
+  error_code?: string;
+  from_ms?: number;
+  to_ms?: number;
+  limit?: number;
+  cursor?: string;
+  latest_per_biz?: boolean;
+  only_without_later_ok?: boolean;
+}
+
 export interface AnalyzeSummaryRow {
   count_total: number;
   count_cached: number;
@@ -139,6 +151,79 @@ export async function getAdminAnalyzeRequest(
     .prepare(`SELECT * FROM analyze_requests WHERE id = ?`)
     .bind(id)
     .first<AnalyzeRow>();
+}
+
+export async function listAnalyzeReprocessCandidates(
+  db: D1Database,
+  opts: ListAnalyzeReprocessCandidatesArgs,
+): Promise<{ items: AnalyzeRow[]; nextCursor: string | null }> {
+  const where: string[] = ["r.status = 'error'"];
+  const vals: unknown[] = [];
+  if (opts.app_id) {
+    where.push("r.app_id = ?");
+    vals.push(opts.app_id);
+  }
+  if (opts.biz_type) {
+    where.push("r.biz_type = ?");
+    vals.push(opts.biz_type);
+  }
+  if (opts.error_code) {
+    where.push("r.error_code = ?");
+    vals.push(opts.error_code);
+  }
+  if (opts.from_ms !== undefined) {
+    where.push("r.created_at >= ?");
+    vals.push(opts.from_ms);
+  }
+  if (opts.to_ms !== undefined) {
+    where.push("r.created_at <= ?");
+    vals.push(opts.to_ms);
+  }
+  if (opts.cursor) {
+    where.push("r.id < ?");
+    vals.push(opts.cursor);
+  }
+  if (opts.latest_per_biz !== false) {
+    where.push(
+      `NOT EXISTS (
+         SELECT 1 FROM analyze_requests newer_error
+         WHERE newer_error.app_id = r.app_id
+           AND newer_error.biz_type = r.biz_type
+           AND newer_error.biz_id = r.biz_id
+           AND newer_error.status = 'error'
+           AND newer_error.created_at > r.created_at
+       )`,
+    );
+  }
+  if (opts.only_without_later_ok !== false) {
+    where.push(
+      `NOT EXISTS (
+         SELECT 1 FROM analyze_requests newer_ok
+         WHERE newer_ok.app_id = r.app_id
+           AND newer_ok.biz_type = r.biz_type
+           AND newer_ok.biz_id = r.biz_id
+           AND newer_ok.status = 'ok'
+           AND newer_ok.created_at > r.created_at
+       )`,
+    );
+  }
+
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const { results } = await db
+    .prepare(
+      `SELECT r.* FROM analyze_requests r
+       WHERE ${where.join(" AND ")}
+       ORDER BY r.id DESC
+       LIMIT ?`,
+    )
+    .bind(...vals, limit + 1)
+    .all<AnalyzeRow>();
+  const hasMore = results.length > limit;
+  const items = hasMore ? results.slice(0, limit) : results;
+  return {
+    items,
+    nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null,
+  };
 }
 
 export async function summarizeAnalyzeRequests(

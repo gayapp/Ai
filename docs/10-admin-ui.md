@@ -91,6 +91,19 @@
 status。数据量较大时使用页尾的 `Previous` / `Next` 按游标翻页，顶部会显示
 当前筛选下的总数与本页范围。
 
+### 历史失败重跑
+
+当前后端提供 `POST /admin/analyze-records/reprocess`，用于将可恢复的历史失败记录分批重新入队。旧记录不会被覆盖，新请求会生成新的 `request_id`，并在 `extra.reprocess` 中保留原 `request_id` 和原错误码。
+
+建议流程：
+
+1. 先用 `dry_run=true` 查看候选集。
+2. 优先筛选 `error_code=schema_validation_failed` 这类平台修复后可恢复的失败。
+3. 每批最多 200 条，观察 `/analyze-ops` 的 pending 与错误率后再继续下一批。
+4. 对 `unsupported_content` 且原因是 IRC 图片 URL 失效的记录，不直接重跑原 input；需要 IRC 重新生成有效图片 URL 后提交新请求。
+
+管理后台暂未提供批量重跑按钮，运维先通过 Admin API 执行，避免误点造成大批量重复入队。
+
 ## moderate 记录详情
 
 路径：`/requests`
