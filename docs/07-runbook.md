@@ -171,6 +171,7 @@ curl -X POST https://aicenter-api.1.gay/admin/alerts/test \
 灰度期保持以下节奏：
 
 1. Telegram 自动监控每 5 分钟执行一次，覆盖 analyze 错误率、延迟、pending、pull ack、callback 未投递。
+   同一周期会重扫 analyze callback delivery，把卡在 `attempts=0` 或到达 `next_retry_at` 的记录重新入队。
 2. 每天查看 `/analyze-ops`，确认 `pending_older_than_5m=0`、错误率低于 1%、provider 主要为 `xai`。
 3. `/analyze-records?status=error` 中旧 `schema_validation_failed` 行是长留存审计；判断是否仍需处理时以“是否有更新 ok 记录”为准。
 4. `unsupported_content` 且 input URL 为旧 `/duanvideo/` 的记录，交给 IRC 重新生成帧图 URL 后重新提交，不使用 admin reprocess。

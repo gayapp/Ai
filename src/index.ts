@@ -30,7 +30,7 @@ import {
 } from "./db/queries.ts";
 import { resolveRoute } from "./providers/router.ts";
 import { CachedResult } from "./moderation/schema.ts";
-import { processCallback } from "./callback/dispatcher.ts";
+import { processCallback, sweepAnalyzeCallbackDeliveries } from "./callback/dispatcher.ts";
 import { saveAvatarEvidence } from "./evidence/r2.ts";
 import { sweepModerationPending } from "./moderation/pending-sweep.ts";
 import { rollupYesterday } from "./stats/rollup.ts";
@@ -315,6 +315,18 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
     } catch (e) {
       console.warn("[scheduled] sweep failed", e);
     }
+
+    try {
+      const r = await sweepAnalyzeCallbackDeliveries(env);
+      if (r.enqueued > 0 || r.failed > 0) {
+        console.log(
+          `[scheduled] analyze callback sweep: scanned=${r.scanned}, ` +
+          `enqueued=${r.enqueued}, failed=${r.failed}`,
+        );
+      }
+    } catch (e) {
+      console.warn("[scheduled] analyze callback sweep failed", e);
+    }
   }
 
   // "5 0 * * *" — daily cleanup + rollup
@@ -369,6 +381,7 @@ app.post("/admin/alerts/test", async (c) => {
 app.post("/admin/alerts/check", async (c) => {
   const { verifyAdmin } = await import("./auth/hmac.ts");
   verifyAdmin(c.env, c.req.raw.headers);
+  await sweepAnalyzeCallbackDeliveries(c.env);
   const r = await checkAndAlert(c.env);
   return c.json(r);
 });

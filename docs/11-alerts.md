@@ -28,12 +28,14 @@
 - Cron `*/5 * * * *` — 错误率/延迟检查
 - Cron `*/5 * * * *` — analyze 错误率、延迟与 backlog 检查
 - Cron `*/5 * * * *` — moderate pending sweep：把 >5 分钟未完成的请求标记为 `error/pending_timeout`，重新入队 callback，并发送 Telegram
+- Cron `*/5 * * * *` — analyze callback sweep：把卡在 `attempts=0` 或到达 `next_retry_at` 的 analyze callback delivery 重新入队
 - Cron 每小时整点 — provider 健康巡检（`checkProviderHealth`）
 - 实时 — Provider 返回 401/403 时 pipeline 立即 `alertProviderAuthFailed`
 
 配置在 [wrangler.toml](../wrangler.toml)。
 阈值代码：
 - [src/alerts/telegram.ts](../src/alerts/telegram.ts) · moderate/analyze 错误率、延迟、analyze backlog
+- [src/callback/dispatcher.ts](../src/callback/dispatcher.ts) · analyze callback delivery sweep
 - [src/alerts/provider-health.ts](../src/alerts/provider-health.ts) · key 状态
 - [src/moderation/pending-sweep.ts](../src/moderation/pending-sweep.ts) · moderate pending 超时扫尾
 

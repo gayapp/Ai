@@ -88,6 +88,9 @@ async function processAnalyzeCallback(
   if (row.delivery_mode === "pull") {
     return;
   }
+  if (row.delivered_at) {
+    return;
+  }
   const app = await loadAppCached(env, row.app_id);
   if (!app) {
     console.warn("[callback] app not found", row.app_id);
@@ -128,6 +131,47 @@ async function processAnalyzeCallback(
   await postSignedCallback(env, job, app, row.id, url, body, async (deliveredAt) => {
     await markAnalyzeDelivered(env.DB, row.id, deliveredAt);
   });
+}
+
+export async function sweepAnalyzeCallbackDeliveries(
+  env: Env,
+  opts: { staleMs?: number; limit?: number } = {},
+): Promise<{ scanned: number; enqueued: number; failed: number }> {
+  const now = Date.now();
+  const staleCutoff = now - (opts.staleMs ?? 5 * 60 * 1000);
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+  const { results } = await env.DB.prepare(
+    `SELECT d.request_id, d.attempts
+     FROM callback_deliveries d
+     JOIN analyze_requests r ON r.id = d.request_id
+     WHERE d.delivered_at IS NULL
+       AND r.status IN ('ok','error')
+       AND r.delivery_mode IN ('callback','both')
+       AND (
+         (d.attempts = 0 AND d.created_at < ?)
+         OR (d.next_retry_at IS NOT NULL AND d.next_retry_at <= ?)
+       )
+     ORDER BY d.created_at ASC
+     LIMIT ?`,
+  )
+    .bind(staleCutoff, now, limit)
+    .all<{ request_id: string; attempts: number | null }>();
+
+  let enqueued = 0;
+  let failed = 0;
+  for (const row of results) {
+    try {
+      await env.CALLBACK_QUEUE.send({
+        request_id: row.request_id,
+        attempt: Math.max(0, Number(row.attempts ?? 0)),
+      });
+      enqueued += 1;
+    } catch (e) {
+      failed += 1;
+      console.warn("[callback-sweep] enqueue failed", row.request_id, e);
+    }
+  }
+  return { scanned: results.length, enqueued, failed };
 }
 
 async function postSignedCallback(
