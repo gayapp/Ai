@@ -74,7 +74,7 @@ export type AnalyzeGrayMetricRow = Pick<
 export async function listAdminAnalyzeRequests(
   db: D1Database,
   opts: ListAdminAnalyzeArgs,
-): Promise<{ items: AnalyzeRow[]; nextCursor: string | null }> {
+): Promise<{ items: AnalyzeRow[]; nextCursor: string | null; total: number }> {
   const where: string[] = [];
   const vals: unknown[] = [];
   if (opts.app_id) {
@@ -105,6 +105,11 @@ export async function listAdminAnalyzeRequests(
     where.push("created_at <= ?");
     vals.push(opts.to_ms);
   }
+  const countSql =
+    `SELECT COUNT(*) AS total FROM analyze_requests` +
+    (where.length ? ` WHERE ${where.join(" AND ")}` : "");
+  const countRow = await db.prepare(countSql).bind(...vals).first<{ total: number }>();
+
   if (opts.cursor) {
     where.push("id < ?");
     vals.push(opts.cursor);
@@ -122,6 +127,7 @@ export async function listAdminAnalyzeRequests(
   return {
     items,
     nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null,
+    total: countRow?.total ?? 0,
   };
 }
 

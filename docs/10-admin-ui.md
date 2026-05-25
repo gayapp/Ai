@@ -85,6 +85,11 @@
 - `acked_at`
 - `error_code`
 
+列表默认展示当前时间窗内的所有状态；如果从运营页跳入时 URL 带有
+`?status=error`，页面只会显示失败记录。点击 `Clear filters` 可回到所有
+status。数据量较大时使用页尾的 `Previous` / `Next` 按游标翻页，顶部会显示
+当前筛选下的总数与本页范围。
+
 ## moderate 记录详情
 
 路径：`/requests`

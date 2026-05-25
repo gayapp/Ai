@@ -28,10 +28,7 @@ class FakeStmt {
   }
   async all<T>(): Promise<{ results: T[] }> {
     if (this.sql.includes("FROM analyze_requests")) {
-      let rows = [...this.db.rows];
-      if (this.sql.includes("biz_id = ?")) {
-        rows = rows.filter((r) => r.biz_id === this.args[0]);
-      }
+      let rows = this.filteredRows();
       rows.sort((a, b) => b.id.localeCompare(a.id));
       return { results: rows as T[] };
     }
@@ -40,6 +37,9 @@ class FakeStmt {
   async first<T>(): Promise<T | null> {
     if (this.sql.includes("WHERE id = ?")) {
       return (this.db.rows.find((r) => r.id === this.args[0]) ?? null) as T | null;
+    }
+    if (this.sql.includes("COUNT(*) AS total FROM analyze_requests")) {
+      return { total: this.filteredRows().length } as T;
     }
     if (this.sql.includes("COUNT(*) AS count_total")) {
       return {
@@ -58,6 +58,44 @@ class FakeStmt {
     }
     return null;
   }
+
+  private filteredRows(): AnalyzeRow[] {
+    let arg = 0;
+    let rows = [...this.db.rows];
+    if (this.sql.includes("app_id = ?")) {
+      const value = this.args[arg++];
+      rows = rows.filter((r) => r.app_id === value);
+    }
+    if (this.sql.includes("biz_type = ?")) {
+      const value = this.args[arg++];
+      rows = rows.filter((r) => r.biz_type === value);
+    }
+    if (this.sql.includes("biz_id = ?")) {
+      const value = this.args[arg++];
+      rows = rows.filter((r) => r.biz_id === value);
+    }
+    if (this.sql.includes("status = ?")) {
+      const value = this.args[arg++];
+      rows = rows.filter((r) => r.status === value);
+    }
+    if (this.sql.includes("delivery_mode = ?")) {
+      const value = this.args[arg++];
+      rows = rows.filter((r) => r.delivery_mode === value);
+    }
+    if (this.sql.includes("created_at >= ?")) {
+      const value = Number(this.args[arg++]);
+      rows = rows.filter((r) => r.created_at >= value);
+    }
+    if (this.sql.includes("created_at <= ?")) {
+      const value = Number(this.args[arg++]);
+      rows = rows.filter((r) => r.created_at <= value);
+    }
+    if (this.sql.includes("id < ?")) {
+      const value = String(this.args[arg++]);
+      rows = rows.filter((r) => r.id < value);
+    }
+    return rows;
+  }
 }
 
 describe("admin analyze records", () => {
@@ -68,10 +106,11 @@ describe("admin analyze records", () => {
       headers: adminHeaders(),
     }), env);
     expect(list.status).toBe(200);
-    const listBody = await list.json() as { items: Array<{ request_id: string; biz_id: string }> };
+    const listBody = await list.json() as { items: Array<{ request_id: string; biz_id: string }>; total: number };
     expect(listBody.items).toEqual([
       expect.objectContaining({ request_id: "r001", biz_id: "video-1" }),
     ]);
+    expect(listBody.total).toBe(1);
 
     const detail = await app.fetch(new Request("http://local/admin/analyze-records/r001", {
       headers: adminHeaders(),

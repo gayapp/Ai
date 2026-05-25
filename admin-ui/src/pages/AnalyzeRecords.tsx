@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   AnalyzeRecords,
   Apps,
@@ -17,19 +17,23 @@ type Period = typeof PERIODS[number];
 
 export default function AnalyzeRecordsPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [apps, setApps] = useState<AppConfig[]>([]);
   const [appId, setAppId] = useState("");
   const [biz, setBiz] = useState("");
   const [bizId, setBizId] = useState("");
+  const [bizIdInput, setBizIdInput] = useState("");
   const [status, setStatus] = useState("");
   const [delivery, setDelivery] = useState("");
   const [period, setPeriod] = useState<Period>("24h");
   const [limit, setLimit] = useState(100);
   const [items, setItems] = useState<AnalyzeRecordRow[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageCursors, setPageCursors] = useState<Array<string | null>>([null]);
+  const [total, setTotal] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
 
   useEffect(() => { Apps.list().then((r) => setApps(r.items)).catch(() => {}); }, []);
@@ -39,16 +43,17 @@ export default function AnalyzeRecordsPage() {
     setAppId(params.get("app_id") ?? "");
     setBiz(params.get("biz_type") ?? "");
     setBizId(params.get("biz_id") ?? "");
+    setBizIdInput(params.get("biz_id") ?? "");
     setStatus(params.get("status") ?? "");
     setDelivery(params.get("delivery_mode") ?? "");
     if (nextPeriod === "1h" || nextPeriod === "24h" || nextPeriod === "7d") {
       setPeriod(nextPeriod);
     }
   }, [location.search]);
-  useEffect(() => { load(); }, [appId, biz, status, delivery, period, limit]);
+  useEffect(() => { void loadFirstPage(); }, [appId, biz, bizId, status, delivery, period, limit]);
 
-  async function load() {
-    setErr(null); setLoading(true); setCursor(null);
+  async function loadPage(targetPage: number, cursor: string | null, cursors: Array<string | null>) {
+    setErr(null); setLoading(true);
     const range = periodRange(period);
     try {
       const r = await AnalyzeRecords.list({
@@ -59,33 +64,53 @@ export default function AnalyzeRecordsPage() {
         delivery_mode: delivery || undefined,
         ...range,
         limit,
+        cursor: cursor || undefined,
       });
       setItems(r.items);
-      setCursor(r.next_cursor);
+      setNextCursor(r.next_cursor);
+      setTotal(r.total);
+      setPage(targetPage);
+      setPageCursors(cursors);
     } catch (e) { setErr(String(e)); }
     finally { setLoading(false); }
   }
 
-  async function loadMore() {
-    if (!cursor || loadingMore) return;
-    setErr(null); setLoadingMore(true);
-    const range = periodRange(period);
-    try {
-      const r = await AnalyzeRecords.list({
-        app_id: appId || undefined,
-        biz_type: biz || undefined,
-        biz_id: bizId || undefined,
-        status: status || undefined,
-        delivery_mode: delivery || undefined,
-        ...range,
-        limit,
-        cursor,
-      });
-      setItems((prev) => [...prev, ...r.items]);
-      setCursor(r.next_cursor);
-    } catch (e) { setErr(String(e)); }
-    finally { setLoadingMore(false); }
+  async function loadFirstPage() {
+    await loadPage(1, null, [null]);
   }
+
+  async function loadNextPage() {
+    if (!nextCursor || loading) return;
+    const nextPage = page + 1;
+    const cursors = [...pageCursors];
+    cursors[nextPage - 1] = nextCursor;
+    await loadPage(nextPage, nextCursor, cursors);
+  }
+
+  async function loadPrevPage() {
+    if (page <= 1 || loading) return;
+    const prevPage = page - 1;
+    await loadPage(prevPage, pageCursors[prevPage - 1] ?? null, pageCursors);
+  }
+
+  function applyBizIdFilter() {
+    setBizId(bizIdInput.trim());
+  }
+
+  function clearFilters() {
+    setAppId("");
+    setBiz("");
+    setBizId("");
+    setBizIdInput("");
+    setStatus("");
+    setDelivery("");
+    setPeriod("24h");
+    navigate("/analyze-records", { replace: true });
+  }
+
+  const firstRow = total && items.length ? (page - 1) * limit + 1 : 0;
+  const lastRow = total && items.length ? firstRow + items.length - 1 : 0;
+  const hasFilters = !!(appId || biz || bizId || status || delivery || period !== "24h");
 
   return (
     <>
@@ -127,7 +152,7 @@ export default function AnalyzeRecordsPage() {
         </div>
         <div>
           <label>biz_id</label>
-          <input value={bizId} onChange={(e) => setBizId(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") load(); }} />
+          <input value={bizIdInput} onChange={(e) => setBizIdInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") applyBizIdFilter(); }} />
         </div>
         <div>
           <label>limit</label>
@@ -135,10 +160,27 @@ export default function AnalyzeRecordsPage() {
             {[50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
-        <button className="btn small secondary" onClick={load}>Refresh</button>
+        <button className="btn small secondary" onClick={applyBizIdFilter}>Search</button>
+        <button className="btn small secondary" onClick={loadFirstPage}>Refresh</button>
+        <button className="btn small secondary" disabled={!hasFilters} onClick={clearFilters}>Clear filters</button>
       </div>
 
       <div className="card">
+        <div className="list-header">
+          <div>
+            <strong>{total ?? "-"} records</strong>
+            <span className="muted"> in current filter</span>
+            {items.length > 0 && (
+              <span className="muted"> · showing {firstRow}-{lastRow}</span>
+            )}
+          </div>
+          <div className="filter-pills">
+            <span className="pill">status: {status || "all"}</span>
+            <span className="pill">biz: {biz || "all"}</span>
+            <span className="pill">window: {period}</span>
+            {bizId && <span className="pill cached">biz_id: {bizId}</span>}
+          </div>
+        </div>
         <table>
           <thead>
             <tr>
@@ -171,10 +213,14 @@ export default function AnalyzeRecordsPage() {
             ))}
           </tbody>
         </table>
-        {!loading && cursor && (
-          <div style={{ textAlign: "center", padding: "16px 0" }}>
-            <button className="btn secondary" disabled={loadingMore} onClick={loadMore}>
-              {loadingMore ? "Loading" : `Load more (${items.length})`}
+        {!loading && items.length > 0 && (
+          <div className="pagination">
+            <button className="btn secondary" disabled={page <= 1 || loading} onClick={loadPrevPage}>
+              Previous
+            </button>
+            <span className="muted monospace">Page {page}</span>
+            <button className="btn secondary" disabled={!nextCursor || loading} onClick={loadNextPage}>
+              Next
             </button>
           </div>
         )}

@@ -30,7 +30,7 @@ const ListAnalyzeQuery = z.object({
 
 adminAnalyzeRecordsRouter.get("/", async (c) => {
   const q = ListAnalyzeQuery.parse(normalizeQuery(c.req.query()));
-  const { items, nextCursor } = await listAdminAnalyzeRequests(c.env.DB, {
+  const { items, nextCursor, total } = await listAdminAnalyzeRequests(c.env.DB, {
     app_id: q.app_id,
     biz_type: q.biz_type,
     biz_id: q.biz_id,
@@ -44,6 +44,7 @@ adminAnalyzeRecordsRouter.get("/", async (c) => {
   return c.json({
     items: items.map(formatAnalyzeListRow),
     next_cursor: nextCursor,
+    total,
   });
 });
 

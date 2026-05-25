@@ -147,6 +147,16 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px
 .toolbar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 16px; }
 .toolbar > * { min-width: 140px; }
 
+.list-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; margin-bottom: 12px;
+}
+.filter-pills { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.pagination {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 16px 0 0;
+}
+
 /* Auth */
 .auth-box {
   max-width: 420px; margin: 96px auto;

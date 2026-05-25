@@ -468,7 +468,7 @@ export const AnalyzeRecords = {
     to?: string;
     limit?: number;
     cursor?: string;
-  } = {}) => api<{ items: AnalyzeRecordRow[]; next_cursor: string | null }>(
+  } = {}) => api<{ items: AnalyzeRecordRow[]; next_cursor: string | null; total: number }>(
     `/admin/analyze-records${qs(q)}`,
   ),
   get: (id: string) => api<AnalyzeRecordDetail>(
