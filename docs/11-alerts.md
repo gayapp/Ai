@@ -7,6 +7,11 @@
 | 错误率 | ≥ 5% | warn（≥20% → crit） |
 | 最高延迟 | ≥ 15s | warn |
 | moderate pending 超时 | > 5 分钟 | sweep 标记为 `error/pending_timeout`，补投 callback，Telegram warn/crit |
+| analyze 错误率 | ≥ 5% | warn（≥20% → crit），附 top error_code |
+| analyze 最高延迟 | ≥ 90s | warn |
+| analyze pending 超时 | > 5 分钟 | Telegram warn/crit，指向 analyze records pending |
+| analyze pull 未 ack | ≥20 条且 > 2 小时 | Telegram warn/crit；仅统计 `pull` 或 `both` 且 callback 也未送达的兜底未消费 |
+| analyze callback 未投递 | ≥1 条且 > 30 分钟 | Telegram warn，指向 callback failed |
 | 时间窗口 | 最近 5 分钟 | 滚动检查 |
 | 最小样本 | 20 条请求 | 低于不判定 |
 | 去重 | 同类型 5 分钟内不重发 | 防刷屏 |
@@ -21,13 +26,14 @@
 
 触发频率：
 - Cron `*/5 * * * *` — 错误率/延迟检查
+- Cron `*/5 * * * *` — analyze 错误率、延迟与 backlog 检查
 - Cron `*/5 * * * *` — moderate pending sweep：把 >5 分钟未完成的请求标记为 `error/pending_timeout`，重新入队 callback，并发送 Telegram
 - Cron 每小时整点 — provider 健康巡检（`checkProviderHealth`）
 - 实时 — Provider 返回 401/403 时 pipeline 立即 `alertProviderAuthFailed`
 
 配置在 [wrangler.toml](../wrangler.toml)。
 阈值代码：
-- [src/alerts/telegram.ts](../src/alerts/telegram.ts) · 错误率/延迟
+- [src/alerts/telegram.ts](../src/alerts/telegram.ts) · moderate/analyze 错误率、延迟、analyze backlog
 - [src/alerts/provider-health.ts](../src/alerts/provider-health.ts) · key 状态
 - [src/moderation/pending-sweep.ts](../src/moderation/pending-sweep.ts) · moderate pending 超时扫尾
 
