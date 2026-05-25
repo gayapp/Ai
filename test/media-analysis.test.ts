@@ -602,6 +602,50 @@ describe("media_analysis pipeline", () => {
       region: { code: "other" },
     });
   });
+
+  it("normalizes wrapped and loose provider JSON into the public output schema", async () => {
+    const { db } = await dispatchWithGeminiResponse(Response.json({
+      candidates: [{ content: { parts: [{ text: JSON.stringify({
+        analysis: {
+          moderation: { decision: "approve", confidence: 1, summary: "ok", violations: [] },
+          tags: { summary: "tags" },
+          ad_detection: { reason: "none" },
+          region: { code: "unknown-region", confidence: 1.4 },
+          face_coordinates: [{
+            frame_index: 1.8,
+            timestamp_seconds: 4.2,
+            box: { x: 1.9, y: 2.1, width: 50.8, height: 60.2 },
+            confidence: 0.9,
+          }],
+          score: 87.9,
+          scoring_breakdown: { visual: 0.7, ignored: "bad" },
+          cover_candidates: [{
+            frame_index: 2.5,
+            timestamp_seconds: 8.1,
+            score: 101,
+            scoring_breakdown: { sharpness: 0.8 },
+            reason: "clear",
+          }],
+          trial: { trial_start_seconds: 1.2, trial_end_seconds: 8.7, trial_score: 2 },
+          frame_notes: [{ frame_index: 1.4, timestamp_seconds: 4.2, summary: "note" }],
+        },
+      }) }] } }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20 },
+    }));
+
+    expect(db.rows[0]).toMatchObject({
+      status: "ok",
+      error_code: null,
+    });
+    expect(JSON.parse(db.rows[0]!.result_json ?? "{}")).toMatchObject({
+      region: { code: "other", confidence: 1 },
+      face_coordinates: [{ box: { x: 1, y: 2, width: 50, height: 60 }, orientation: "unknown" }],
+      score: 87,
+      scoring_breakdown: { visual: 0.7 },
+      cover_candidates: [{ frame_index: 2, score: 100, is_recommended: false }],
+      trial: { trial_start_seconds: 1, trial_end_seconds: 8, trial_score: 1, status: "pending" },
+    });
+  });
 });
 
 function makeRow(id: string, inputHash = "same-input-hash"): AnalyzeRow {

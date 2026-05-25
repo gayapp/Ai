@@ -362,14 +362,37 @@ const MEDIA_ANALYSIS_KEYS = [
 
 function normalizeMediaAnalysisOutput(value: unknown): unknown {
   if (!isRecord(value)) return value;
+  const unwrapped = unwrapMediaAnalysisOutput(value);
+  if (unwrapped !== value) return normalizeMediaAnalysisOutput(unwrapped);
   if (!MEDIA_ANALYSIS_KEYS.some((key) => key in value)) return value;
   const out: Record<string, unknown> = { ...value };
   out.moderation = normalizeModeration(out.moderation);
   out.tags = normalizeTags(out.tags);
   out.ad_detection = normalizeAdDetection(out.ad_detection);
-  out.face_coordinates = Array.isArray(out.face_coordinates) ? out.face_coordinates : [];
+  out.face_coordinates = Array.isArray(out.face_coordinates)
+    ? out.face_coordinates.map(normalizeFaceCoordinate)
+    : [];
   out.region = normalizeRegion(out.region);
+  if ("score" in out) out.score = integerInRange(out.score, 0, 0, 100);
+  if ("scoring_breakdown" in out) out.scoring_breakdown = numericRecordOr(out.scoring_breakdown);
+  if (Array.isArray(out.cover_candidates)) {
+    out.cover_candidates = out.cover_candidates.slice(0, 5).map(normalizeCoverCandidate);
+  }
+  if ("trial" in out) out.trial = normalizeTrial(out.trial);
+  if (Array.isArray(out.frame_notes)) {
+    out.frame_notes = out.frame_notes.map(normalizeFrameNote);
+  }
   return out;
+}
+
+function unwrapMediaAnalysisOutput(value: Record<string, unknown>): unknown {
+  for (const key of ["result", "analysis", "media_analysis", "data", "output"]) {
+    const nested = value[key];
+    if (isRecord(nested) && MEDIA_ANALYSIS_KEYS.some((mediaKey) => mediaKey in nested)) {
+      return nested;
+    }
+  }
+  return value;
 }
 
 function normalizeModeration(value: unknown): Record<string, unknown> {
@@ -440,6 +463,57 @@ function normalizeRegion(value: unknown): Record<string, unknown> {
   };
 }
 
+function normalizeFaceCoordinate(value: unknown): Record<string, unknown> {
+  const src = isRecord(value) ? value : {};
+  const box = isRecord(src.box) ? src.box : {};
+  return {
+    ...(typeof src.frame_index === "number" ? { frame_index: Math.trunc(src.frame_index) } : {}),
+    ...(typeof src.timestamp_seconds === "number"
+      ? { timestamp_seconds: Math.max(0, src.timestamp_seconds) }
+      : {}),
+    box: {
+      x: integerInRange(box.x, 0, 0, Number.MAX_SAFE_INTEGER),
+      y: integerInRange(box.y, 0, 0, Number.MAX_SAFE_INTEGER),
+      width: integerInRange(box.width, 0, 0, Number.MAX_SAFE_INTEGER),
+      height: integerInRange(box.height, 0, 0, Number.MAX_SAFE_INTEGER),
+    },
+    orientation: stringOr(src.orientation, "unknown"),
+    confidence: numberInRange(src.confidence, 0, 0, 1),
+  };
+}
+
+function normalizeCoverCandidate(value: unknown): Record<string, unknown> {
+  const src = isRecord(value) ? value : {};
+  return {
+    frame_index: integerInRange(src.frame_index, 1, 0, Number.MAX_SAFE_INTEGER),
+    timestamp_seconds: numberInRange(src.timestamp_seconds, 0, 0, Number.MAX_SAFE_INTEGER),
+    score: integerInRange(src.score, 0, 0, 100),
+    scoring_breakdown: numericRecordOr(src.scoring_breakdown),
+    reason: stringOr(src.reason, ""),
+    is_recommended: typeof src.is_recommended === "boolean" ? src.is_recommended : false,
+  };
+}
+
+function normalizeTrial(value: unknown): Record<string, unknown> {
+  const src = isRecord(value) ? value : {};
+  return {
+    trial_start_seconds: integerInRange(src.trial_start_seconds, 0, 0, Number.MAX_SAFE_INTEGER),
+    trial_end_seconds: integerInRange(src.trial_end_seconds, 0, 0, Number.MAX_SAFE_INTEGER),
+    trial_score: numberInRange(src.trial_score, 0, 0, 1),
+    reason: stringOr(src.reason, ""),
+    status: src.status === "ready" || src.status === "pending" ? src.status : "pending",
+  };
+}
+
+function normalizeFrameNote(value: unknown): Record<string, unknown> {
+  const src = isRecord(value) ? value : {};
+  return {
+    frame_index: integerInRange(src.frame_index, 1, 0, Number.MAX_SAFE_INTEGER),
+    timestamp_seconds: numberInRange(src.timestamp_seconds, 0, 0, Number.MAX_SAFE_INTEGER),
+    summary: stringOr(src.summary, ""),
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -459,6 +533,21 @@ function stringArray(value: unknown): string[] {
 function numberInRange(value: unknown, fallback: number, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(Math.max(value, min), max);
+}
+
+function integerInRange(value: unknown, fallback: number, min: number, max: number): number {
+  return Math.trunc(numberInRange(value, fallback, min, max));
+}
+
+function numericRecordOr(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+  const out: Record<string, number> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "number" && Number.isFinite(item)) {
+      out[key] = item;
+    }
+  }
+  return out;
 }
 
 function mediaAnalysisDedupKey(promptVersion: number, inputHash: string): string {
