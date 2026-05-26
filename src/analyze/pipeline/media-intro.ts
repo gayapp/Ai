@@ -226,7 +226,7 @@ async function tryMediaIntroProvider(
   }
   context.promptVersion = prompt.version;
 
-  const cacheKey = mediaIntroDedupKey(prompt.version, inputHash);
+  const cacheKey = mediaIntroDedupKey(provider, prompt.version, inputHash);
   const cached = await getCachedMediaIntro(env.DEDUP_CACHE, cacheKey);
   if (cached) {
     return {
@@ -337,8 +337,12 @@ async function callMediaIntroProvider(
   }
 }
 
-function mediaIntroDedupKey(promptVersion: number, inputHash: string): string {
-  return `media_intro:${promptVersion}:${inputHash}`;
+function mediaIntroDedupKey(
+  provider: MediaIntroProvider,
+  promptVersion: number,
+  inputHash: string,
+): string {
+  return `media_intro:${provider}:${promptVersion}:${inputHash}`;
 }
 
 async function getCachedMediaIntro(

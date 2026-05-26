@@ -188,7 +188,7 @@ async function tryMediaAnalysisProvider(
   }
   context.promptVersion = prompt.version;
 
-  const cacheKey = mediaAnalysisDedupKey(prompt.version, inputHash);
+  const cacheKey = mediaAnalysisDedupKey(provider, prompt.version, inputHash);
   const cached = await getCachedMediaAnalysis(env.DEDUP_CACHE, cacheKey);
   if (cached) {
     return {
@@ -609,8 +609,12 @@ function extractFirstJsonObject(text: string): string | null {
   return null;
 }
 
-function mediaAnalysisDedupKey(promptVersion: number, inputHash: string): string {
-  return `media_analysis:${promptVersion}:${inputHash}`;
+function mediaAnalysisDedupKey(
+  provider: MediaAnalysisProvider,
+  promptVersion: number,
+  inputHash: string,
+): string {
+  return `media_analysis:${provider}:${promptVersion}:${inputHash}`;
 }
 
 async function getCachedMediaAnalysis(
