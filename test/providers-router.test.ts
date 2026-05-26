@@ -2,10 +2,17 @@ import { describe, expect, it } from "vitest";
 import { resolveAnalyzeRoute } from "../src/providers/router.ts";
 
 describe("analyze provider routing", () => {
-  it("routes media_analysis to xAI first when strategy is grok", () => {
+  it("routes media_analysis to xAI only when strategy is grok", () => {
     expect(resolveAnalyzeRoute("media_analysis", "grok")).toEqual({
       primary: "xai",
-      fallback: "gemini",
+      fallback: null,
+    });
+  });
+
+  it("routes media_intro to xAI only when strategy is grok", () => {
+    expect(resolveAnalyzeRoute("media_intro", "grok")).toEqual({
+      primary: "xai",
+      fallback: null,
     });
   });
 

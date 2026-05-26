@@ -559,6 +559,62 @@ describe("media_analysis pipeline", () => {
     expect(countFetches(fetchMock, "generativelanguage.googleapis.com")).toBe(0);
   });
 
+  it("does not fall back to Gemini when the app provider strategy is grok", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const db = new FakeD1();
+    const apps = new MemKV();
+    db.rows.push(makeRow("r1"));
+    await apps.put("app:app_a", JSON.stringify({
+      id: "app_a",
+      name: "IRC",
+      secret: "secret",
+      callback_url: "https://consumer.example.com/analyze",
+      biz_types: [],
+      analyze_biz_types: ["media_analysis"],
+      delivery_mode: "both",
+      callback_max_concurrency: 10,
+      rate_limit_qps: 50,
+      disabled: false,
+      provider_strategy: "grok",
+    }));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("cdn.example.com")) return imageResponse();
+      if (url.includes("api.x.ai")) return new Response("temporary", { status: 503 });
+      return new Response("unexpected url", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(dispatchAnalyzeJob({
+      DB: db,
+      APPS: apps,
+      NONCE: new MemKV(),
+      PROMPTS: new MemKV(),
+      DEDUP_CACHE: new MemKV(),
+      CALLBACK_QUEUE: new MemQueue<object>(),
+      GROK_API_KEY: "grok-key",
+      GROK_MEDIA_MODEL: "grok-test",
+      GEMINI_API_KEY: "gemini-key",
+      GEMINI_MODEL: "gemini-test",
+      DEDUP_TTL_SECONDS: "604800",
+    } as unknown as Env, {
+      request_id: "r1",
+      app_id: "app_a",
+      biz_type: "media_analysis",
+      created_at_ms: Date.now(),
+    })).rejects.toMatchObject({
+      code: ErrorCodes.PROVIDER_ERROR,
+    });
+
+    expect(countFetches(fetchMock, "api.x.ai")).toBe(1);
+    expect(countFetches(fetchMock, "generativelanguage.googleapis.com")).toBe(0);
+    expect(db.rows[0]).toMatchObject({
+      status: "pending",
+      provider: null,
+      error_code: null,
+      completed_at: null,
+    });
+  });
+
   it("leaves the row pending for provider errors so the queue can retry", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const db = new FakeD1();

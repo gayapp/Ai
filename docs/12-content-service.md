@@ -19,8 +19,8 @@ ai-guard 从单一「UGC 审核中转」扩展为双轨平台：
 
 | biz_type | 场景 | 默认 provider | 输入 |
 |----------|------|---------------|------|
-| `media_analysis` | 图片 / 视频帧多模态分析 | `auto`: Gemini，xAI 兜底；`provider_strategy=grok`: xAI 优先 | 1..16 张 `https://` 图片 URL + 可选上下文 |
-| `media_intro` | 视频简介生成 | xAI，Gemini 兜底；可按 app provider strategy 调整 | 标题、标签、帧摘要、OCR、字幕等结构化文本 |
+| `media_analysis` | 图片 / 视频帧多模态分析 | `auto`: Gemini，xAI 兜底；`provider_strategy=grok`: xAI only，不 fallback Gemini | 1..16 张 `https://` 图片 URL + 可选上下文 |
+| `media_intro` | 视频简介生成 | `auto`: xAI，Gemini 兜底；`provider_strategy=grok`: xAI only，不 fallback Gemini | 标题、标签、帧摘要、OCR、字幕等结构化文本 |
 
 不在本期范围：
 

@@ -16,15 +16,16 @@ ai-guard 生产环境已可用于 IRC 侧灰度：
 | Analyze app config | 已启用 `media_analysis` / `media_intro` |
 | Delivery mode | `both` |
 | Pull ack backlog | 最近 smoke 后为 0 |
-| Provider | xAI 可用；Gemini key 已刷新，但最近 health 仍可能返回 `429` |
+| Provider | IRC app 使用 `provider_strategy=grok`，analyze 线只走 xAI / Grok，不 fallback 到 Gemini |
 
 当前生产已启用 analyze 的 app：
 
 ```text
-app_id: app_f2ce7d84dec8ad56
-name: 一起看
+app_id: app_50b5c734c751d589
+name: IRC
 analyze_biz_types: ["media_analysis", "media_intro"]
 delivery_mode: both
+provider_strategy: grok
 ```
 
 如果 IRC 需要与“一起看”正式应用隔离，应在 Admin UI `/apps` 新建独立 app：点击 `New app` 后使用 `IRC analyze` 预设，再把 `AI_GUARD_APP_ID` / secret 切到新 app。
@@ -34,7 +35,7 @@ delivery_mode: both
 ```env
 AI_BACKEND=ai_guard
 AI_GUARD_BASE_URL=https://aicenter-api.1.gay
-AI_GUARD_APP_ID=app_f2ce7d84dec8ad56
+AI_GUARD_APP_ID=app_50b5c734c751d589
 AI_GUARD_APP_SECRET=<从安全渠道读取>
 AI_GUARD_DELIVERY_MODE=both
 AI_GUARD_TIMEOUT_SECONDS=180
@@ -116,7 +117,7 @@ GET 请求签空 body。ack 建议也签空 body。
 ```bash
 BASE=https://aicenter-api.1.gay \
 ADMIN_TOKEN=<prod-admin-token> \
-APP_ID=app_f2ce7d84dec8ad56 \
+APP_ID=app_50b5c734c751d589 \
 BASELINE_P95_MS=<IRC internal p95> \
 WINDOW_HOURS=24 \
 node scripts/analyze-gray-report.mjs --assert
@@ -134,7 +135,73 @@ node scripts/analyze-gray-report.mjs --assert
 - `media_analysis`：`status=ok`，pull 成功，ack 成功。
 - fresh window：`ok=2 / error=0 / pull_unacked=0`。
 
-`media_analysis` 当前可通过 xAI fallback 跑通。Gemini health 最近仍可能出现 `http 429`，应按 provider 配额/限流问题处理，不视为 ai-guard 部署失败。
+`media_analysis` 当前通过 xAI / Grok 跑通。IRC app 设置为 `provider_strategy=grok` 后，ai-guard 不会把 IRC analyze 请求转交 Gemini；xAI 临时不可用时请求保持 `pending`，由队列重试和 pending sweep 追赶。
+
+## 失败重提指令（转发给 IRC agent）
+
+请只处理 IRC 侧仍没有后续成功结果的任务；不要覆盖 ai-guard 旧 `request_id`，旧记录保留审计。重新提交后以新的 ai-guard `request_id` 覆盖 IRC 业务状态。
+
+### `unsupported_content`
+
+含义：ai-guard 无法读取素材，常见原因是帧图 URL 过期、bucket 路径错误、非 `https://`、返回非图片 content-type、403/404/5xx。
+
+处理步骤：
+
+1. 找到 IRC 任务对应的原始素材 / 视频帧。
+2. 重新生成 1..16 张帧图，上传到稳定可公网读取的 HTTPS URL。
+3. 在 IRC 侧提交前逐个校验 URL：`GET` 返回 `200`，`content-type` 是 `image/jpeg` / `image/png` / `image/webp`，且 URL 至少在 ai-guard 处理窗口内有效。
+4. 重新调用 `POST /v1/analyze`，使用原 `biz_id`，`biz_type="media_analysis"`，`input.image_urls` 传新的 URL 列表。
+5. 记录新的 `request_id`，等待 callback 或 pull 结果；收到最终结果后调用 ack。
+
+### `invalid_request`
+
+含义：请求 JSON 没通过 ai-guard input schema。
+
+`media_analysis` 必须满足：
+
+```json
+{
+  "biz_type": "media_analysis",
+  "biz_id": "<stable IRC task id>",
+  "input": {
+    "image_urls": ["https://..."],
+    "title": "optional, <=2048 chars",
+    "duration_seconds": 123,
+    "frame_metadata": [
+      { "timestamp_seconds": 1.2, "quality_score": 0.9, "scene_id": 1 }
+    ],
+    "region_hint": "optional"
+  },
+  "delivery_mode": "both"
+}
+```
+
+校验要点：`image_urls` 必须是 1..16 个 `https://` URL；`duration_seconds` 是非负整数；`timestamp_seconds` / `quality_score` 是非负数字；`title` 最长 2048 字符。
+
+`media_intro` 必须满足：
+
+```json
+{
+  "biz_type": "media_intro",
+  "biz_id": "<stable IRC task id>",
+  "input": {
+    "title": "required, 1..2048 chars",
+    "duration_seconds": 123,
+    "tags": ["optional"],
+    "frame_notes": [
+      { "timestamp_seconds": 1.2, "summary": "frame summary" }
+    ],
+    "ocr_lines": ["optional"],
+    "subtitle_text": "optional",
+    "trial_excerpt": "optional",
+    "style_hint": "concise",
+    "max_length": 300
+  },
+  "delivery_mode": "both"
+}
+```
+
+校验要点：`title` 必填；`style_hint` 只能是 `concise` / `narrative` / `marketing`；`max_length` 范围 50..2000。
 
 ## IRC 实现注意点
 

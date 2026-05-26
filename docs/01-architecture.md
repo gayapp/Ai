@@ -289,12 +289,12 @@ media_intro    → xai    → gemini
 
 **每个 app 可独立设置 `provider_strategy`**：
 
-| 策略 | 文本主 → 备 | 头像 |
-|------|-------------|------|
-| `auto` | grok → gemini | gemini |
-| `grok` | grok → gemini | gemini |
-| `gemini` | gemini → grok | gemini |
-| `round_robin` | 秒切：grok ⇄ gemini | gemini |
+| 策略 | moderate 文本主 → 备 | moderate 头像 | analyze |
+|------|-------------|------|------|
+| `auto` | grok → gemini | gemini | 默认路由 |
+| `grok` | grok → gemini | gemini | xAI only，无 Gemini fallback |
+| `gemini` | gemini → grok | gemini | Gemini 优先，xAI fallback |
+| `round_robin` | 秒切：grok ⇄ gemini | gemini | xAI / Gemini 秒切，另一家 fallback |
 
 **熔断**：provider 连续失败 5 次（60s 窗口）触发熔断 30s，自动切备。状态存 KV，跨边缘生效。
 

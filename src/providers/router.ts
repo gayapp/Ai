@@ -90,7 +90,7 @@ export function resolveAnalyzeRoute(
     case "grok":
       return {
         primary: "xai",
-        fallback: route.primary === "xai" ? route.fallback : route.primary,
+        fallback: null,
       };
     case "round_robin": {
       const primary: AnalyzeProvider = (Math.floor(Date.now() / 1000) % 2 === 0)
