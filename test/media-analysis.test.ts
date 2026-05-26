@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { processCallback } from "../src/callback/dispatcher.ts";
 import { dispatchAnalyzeJob } from "../src/analyze/pipeline/dispatcher.ts";
+import { executeMediaAnalysis } from "../src/analyze/pipeline/media-analysis.ts";
 import { callGeminiMediaAnalysis } from "../src/analyze/providers/gemini-media.ts";
 import { callXaiMediaAnalysis } from "../src/analyze/providers/xai-media.ts";
 import {
@@ -254,6 +255,39 @@ describe("xAI media provider", () => {
           { type: "text", text: "prompt" },
         ],
       }],
+    });
+  });
+});
+
+describe("media_analysis retry handling", () => {
+  it("leaves the row pending and rethrows when all providers are unavailable", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const db = new FakeD1();
+    const row = makeRow("r1");
+    db.rows.push(row);
+    const nonce = new MemKV();
+    const now = Date.now();
+    const openCircuit = JSON.stringify({
+      failures: 5,
+      openUntil: now + 60_000,
+      lastFailure: now,
+    });
+    await nonce.put("cb:xai:media_analysis", openCircuit);
+    await nonce.put("cb:gemini:media_analysis", openCircuit);
+
+    await expect(executeMediaAnalysis({
+      DB: db,
+      NONCE: nonce,
+      PROMPTS: new MemKV(),
+      DEDUP_CACHE: new MemKV(),
+    } as unknown as Env, row, "grok")).rejects.toMatchObject({
+      code: ErrorCodes.SERVICE_UNAVAILABLE,
+    });
+
+    expect(row).toMatchObject({
+      status: "pending",
+      error_code: null,
+      completed_at: null,
     });
   });
 });
@@ -525,16 +559,42 @@ describe("media_analysis pipeline", () => {
     expect(countFetches(fetchMock, "generativelanguage.googleapis.com")).toBe(0);
   });
 
-  it("records provider_error for Gemini 5xx after retries", async () => {
+  it("leaves the row pending for provider errors so the queue can retry", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { db, fetchMock } = await dispatchWithGeminiResponse(
-      new Response("temporary", { status: 503 }),
-    );
+    const db = new FakeD1();
+    db.rows.push(makeRow("r1"));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("cdn.example.com")) return imageResponse();
+      return new Response("temporary", { status: 503 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(dispatchAnalyzeJob({
+      DB: db,
+      NONCE: new MemKV(),
+      PROMPTS: new MemKV(),
+      DEDUP_CACHE: new MemKV(),
+      CALLBACK_QUEUE: new MemQueue<object>(),
+      GEMINI_API_KEY: "gemini-key",
+      GEMINI_MODEL: "gemini-test",
+      GROK_API_KEY: "grok-key",
+      GROK_MEDIA_MODEL: "grok-test",
+      DEDUP_TTL_SECONDS: "604800",
+    } as unknown as Env, {
+      request_id: "r1",
+      app_id: "app_a",
+      biz_type: "media_analysis",
+      created_at_ms: Date.now(),
+    })).rejects.toMatchObject({
+      code: ErrorCodes.PROVIDER_ERROR,
+    });
 
     expect(countFetches(fetchMock, "generativelanguage.googleapis.com")).toBe(3);
+    expect(countFetches(fetchMock, "api.x.ai")).toBe(1);
     expect(db.rows[0]).toMatchObject({
-      status: "error",
-      error_code: ErrorCodes.PROVIDER_ERROR,
+      status: "pending",
+      error_code: null,
+      completed_at: null,
     });
   });
 

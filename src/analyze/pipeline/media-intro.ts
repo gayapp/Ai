@@ -59,10 +59,23 @@ export async function executeMediaIntro(
     await completeMediaIntroOk(env, row.id, run);
     await cacheMediaIntro(env, run);
   } catch (e) {
+    const code = e instanceof AppError ? e.code : ErrorCodes.INTERNAL;
+    if (isRetryableAnalyzeExecutionError(code)) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("[media-intro] retryable failure", row.id, code, msg);
+      throw e;
+    }
     await completeMediaIntroError(env, row.id, e, context);
     const msg = e instanceof Error ? e.message : String(e);
     console.warn("[media-intro] failed", row.id, msg);
   }
+}
+
+function isRetryableAnalyzeExecutionError(code: string): boolean {
+  return code === ErrorCodes.SERVICE_UNAVAILABLE ||
+    code === ErrorCodes.PROVIDER_AUTH_FAILED ||
+    code === ErrorCodes.PROVIDER_ERROR ||
+    code === ErrorCodes.PROVIDER_TIMEOUT;
 }
 
 export async function runMediaIntro(

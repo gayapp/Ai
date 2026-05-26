@@ -102,6 +102,10 @@ export async function executeMediaAnalysis(
   } catch (e) {
     const code = e instanceof AppError ? e.code : ErrorCodes.INTERNAL;
     const msg = e instanceof Error ? e.message : String(e);
+    if (isRetryableAnalyzeExecutionError(code)) {
+      console.warn("[media-analysis] retryable failure", row.id, code, msg);
+      throw e;
+    }
     await completeAnalyze(env.DB, {
       id: row.id,
       cached: false,
@@ -117,6 +121,13 @@ export async function executeMediaAnalysis(
     });
     console.warn("[media-analysis] failed", row.id, msg);
   }
+}
+
+function isRetryableAnalyzeExecutionError(code: string): boolean {
+  return code === ErrorCodes.SERVICE_UNAVAILABLE ||
+    code === ErrorCodes.PROVIDER_AUTH_FAILED ||
+    code === ErrorCodes.PROVIDER_ERROR ||
+    code === ErrorCodes.PROVIDER_TIMEOUT;
 }
 
 async function runMediaAnalysisRoute(

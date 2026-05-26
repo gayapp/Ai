@@ -34,6 +34,7 @@ import { processCallback, sweepAnalyzeCallbackDeliveries } from "./callback/disp
 import { saveAvatarEvidence } from "./evidence/r2.ts";
 import { sweepModerationPending } from "./moderation/pending-sweep.ts";
 import { rollupYesterday } from "./stats/rollup.ts";
+import { sweepAnalyzePending } from "./analyze/pending-sweep.ts";
 import { dispatchAnalyzeJob } from "./analyze/pipeline/dispatcher.ts";
 import type { AnalyzeJob } from "./analyze/types.ts";
 import type { CallbackJob, ModerationJob } from "./moderation/types.ts";
@@ -317,6 +318,18 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
     }
 
     try {
+      const r = await sweepAnalyzePending(env);
+      if (r.enqueued > 0 || r.failed > 0) {
+        console.log(
+          `[scheduled] analyze pending sweep: scanned=${r.scanned}, ` +
+          `enqueued=${r.enqueued}, failed=${r.failed}`,
+        );
+      }
+    } catch (e) {
+      console.warn("[scheduled] analyze pending sweep failed", e);
+    }
+
+    try {
       const r = await sweepAnalyzeCallbackDeliveries(env);
       if (r.enqueued > 0 || r.failed > 0) {
         console.log(
@@ -381,6 +394,7 @@ app.post("/admin/alerts/test", async (c) => {
 app.post("/admin/alerts/check", async (c) => {
   const { verifyAdmin } = await import("./auth/hmac.ts");
   verifyAdmin(c.env, c.req.raw.headers);
+  await sweepAnalyzePending(c.env);
   await sweepAnalyzeCallbackDeliveries(c.env);
   const r = await checkAndAlert(c.env);
   return c.json(r);
