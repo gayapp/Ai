@@ -206,6 +206,7 @@ Cron 自动行为：
 
 - Grok / Gemini secret 是否已配置。
 - 当前 Grok / Gemini 模型名。
+- Gemini 模型选择器：保存后写入 Worker KV，立即影响 dry-run、moderate fallback 与 analyze fallback。
 - global circuit：moderate 路由熔断状态。
 - `media_analysis` / `media_intro` circuit：analyze 路由熔断状态。
 

@@ -457,7 +457,22 @@ Query：`biz_type`、`provider`、`limit`。
   },
   "models": {
     "grok": "grok-4-fast-non-reasoning",
-    "gemini": "gemini-2.5-flash"
+    "grok_media": "grok-4",
+    "gemini": "gemini-2.5-flash-lite"
+  },
+  "model_options": {
+    "gemini": [
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-flash",
+      "gemini-flash-lite-latest",
+      "gemini-2.0-flash-lite",
+      "gemini-2.0-flash"
+    ]
+  },
+  "model_source": {
+    "grok": "env",
+    "grok_media": "env",
+    "gemini": "kv"
   },
   "circuits": [
     {
@@ -474,6 +489,18 @@ Query：`biz_type`、`provider`、`limit`。
 ```
 
 需要真实请求上游并可能触发告警时，使用 `POST /admin/alerts/provider-health`。
+
+### `PATCH /admin/providers/models`
+
+在 KV 中保存 provider 模型覆盖值，立即生效，无需重新部署 Worker。
+
+```json
+{
+  "gemini": "gemini-2.5-flash-lite"
+}
+```
+
+当前只允许从 `model_options.gemini` 中选择 Gemini 模型；Grok 模型仍由 wrangler vars 管理。
 
 ---
 

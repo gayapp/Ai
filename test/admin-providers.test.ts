@@ -21,16 +21,44 @@ describe("admin providers", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as {
       secrets: { grok_configured: boolean; gemini_configured: boolean };
-      models: { grok: string; gemini: string };
+      models: { grok: string; grok_media: string; gemini: string };
+      model_source: { gemini: string };
       circuits: Array<{ provider: string; biz_type: string | null; state: string }>;
     };
     expect(body.secrets).toEqual({ grok_configured: true, gemini_configured: true });
     expect(body.models.grok).toBe("grok-test");
+    expect(body.models.gemini).toBe("gemini-test");
+    expect(body.model_source.gemini).toBe("env");
     expect(body.circuits).toContainEqual(expect.objectContaining({
       provider: "gemini",
       biz_type: "media_analysis",
       state: "open",
     }));
+  });
+
+  it("updates the Gemini model override", async () => {
+    const nonce = new MemKV();
+    const apps = new MemKV();
+    const app = makeApp();
+    const headers = adminHeaders();
+    headers.set("content-type", "application/json");
+
+    const patch = await app.fetch(new Request("http://local/admin/providers/models", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ gemini: "gemini-2.5-flash-lite" }),
+    }), makeEnv(nonce, apps));
+    expect(patch.status).toBe(200);
+
+    const res = await app.fetch(new Request("http://local/admin/providers/status", {
+      headers: adminHeaders(),
+    }), makeEnv(nonce, apps));
+    const body = await res.json() as {
+      models: { gemini: string };
+      model_source: { gemini: string };
+    };
+    expect(body.models.gemini).toBe("gemini-2.5-flash-lite");
+    expect(body.model_source.gemini).toBe("kv");
   });
 });
 
@@ -44,13 +72,15 @@ function makeApp(): Hono<{ Bindings: Env }> {
   return app;
 }
 
-function makeEnv(nonce: MemKV): Env {
+function makeEnv(nonce: MemKV, apps = new MemKV()): Env {
   return {
     NONCE: nonce,
+    APPS: apps,
     ADMIN_TOKEN: "admin-token",
     GROK_API_KEY: "xai-key",
     GEMINI_API_KEY: "gemini-key",
     GROK_MODEL: "grok-test",
+    GROK_MEDIA_MODEL: "grok-media-test",
     GEMINI_MODEL: "gemini-test",
   } as unknown as Env;
 }

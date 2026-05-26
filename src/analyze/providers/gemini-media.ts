@@ -1,4 +1,5 @@
 import { AppError, ErrorCodes } from "../../lib/errors.ts";
+import { getGeminiModel } from "../../providers/model-config.ts";
 import { MediaAnalysisResponseSchema, type MediaAnalysisInputT } from "../schema/media-analysis.ts";
 
 const MAX_ATTEMPTS = 3;
@@ -26,7 +27,7 @@ export async function callGeminiMediaAnalysis(
   if (!apiKey) {
     throw new AppError(ErrorCodes.PROVIDER_ERROR, 500, "GEMINI_API_KEY not configured");
   }
-  const model = env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = await getGeminiModel(env);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model,
   )}:generateContent?key=${apiKey}`;

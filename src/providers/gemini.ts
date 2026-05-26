@@ -1,4 +1,5 @@
 import { AppError, ErrorCodes } from "../lib/errors.ts";
+import { getGeminiModel } from "./model-config.ts";
 import type { ProviderAdapter, ProviderCallArgs, ProviderResult } from "./router.ts";
 
 const STRUCTURE_SUFFIX =
@@ -12,7 +13,7 @@ export function createGeminiAdapter(env: Env): ProviderAdapter {
       if (!apiKey) {
         throw new AppError(ErrorCodes.PROVIDER_ERROR, 500, "GEMINI_API_KEY not configured");
       }
-      const model = env.GEMINI_MODEL || "gemini-2.5-flash";
+      const model = await getGeminiModel(env);
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
         model,
       )}:generateContent?key=${apiKey}`;

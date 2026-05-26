@@ -13,6 +13,8 @@ export default function ProvidersPage() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [savingModel, setSavingModel] = useState(false);
+  const [geminiModel, setGeminiModel] = useState("");
 
   useEffect(() => { load(); }, []);
 
@@ -20,7 +22,9 @@ export default function ProvidersPage() {
     setErr(null);
     setLoading(true);
     try {
-      setStatus(await Providers.status());
+      const next = await Providers.status();
+      setStatus(next);
+      setGeminiModel(next.models.gemini);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -40,6 +44,19 @@ export default function ProvidersPage() {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function saveModel() {
+    setErr(null);
+    setSavingModel(true);
+    try {
+      const next = await Providers.updateModels({ gemini: geminiModel });
+      setStatus((current) => current ? { ...current, ...next } : current);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingModel(false);
     }
   }
 
@@ -64,7 +81,35 @@ export default function ProvidersPage() {
             <Metric label="Grok key" value={status.secrets.grok_configured ? "configured" : "missing"} color={status.secrets.grok_configured ? "good" : "bad"} />
             <Metric label="Gemini key" value={status.secrets.gemini_configured ? "configured" : "missing"} color={status.secrets.gemini_configured ? "good" : "bad"} />
             <Metric label="Grok model" value={<code>{status.models.grok}</code>} />
-            <Metric label="Gemini model" value={<code>{status.models.gemini}</code>} />
+            <Metric label="Gemini model" value={<code>{status.models.gemini}</code>} color={status.model_source.gemini === "kv" ? "good" : undefined} />
+          </div>
+
+          <div className="card">
+            <h3>Model settings</h3>
+            <div className="form-grid two">
+              <label>
+                Gemini model
+                <select value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)}>
+                  {status.model_options.gemini.map((model) => (
+                    <option key={model} value={model}>
+                      {model === "gemini-2.5-flash-lite" ? `${model} (recommended)` : model}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Source
+                <input value={status.model_source.gemini} disabled />
+              </label>
+            </div>
+            <div className="toolbar mt8">
+              <button className="btn small" disabled={savingModel || !geminiModel || geminiModel === status.models.gemini} onClick={saveModel}>
+                {savingModel ? "Saving" : "Save model"}
+              </button>
+            </div>
+            <div className="muted mt8" style={{ fontSize: 12 }}>
+              The saved Gemini model is stored in KV and takes effect immediately for dry-runs, moderate fallback, and analyze fallback.
+            </div>
           </div>
 
           <div className="card">

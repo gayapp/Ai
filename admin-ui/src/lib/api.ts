@@ -314,7 +314,16 @@ export interface ProviderStatusData {
   };
   models: {
     grok: string;
+    grok_media: string;
     gemini: string;
+  };
+  model_options: {
+    gemini: string[];
+  };
+  model_source: {
+    grok: "env" | "kv";
+    grok_media: "env" | "kv";
+    gemini: "env" | "kv";
   };
   circuits: ProviderCircuit[];
 }
@@ -514,6 +523,11 @@ export const PromptRegression = {
 
 export const Providers = {
   status: () => api<ProviderStatusData>("/admin/providers/status"),
+  updateModels: (body: { gemini?: string }) =>
+    api<Pick<ProviderStatusData, "models" | "model_options" | "model_source">>(
+      "/admin/providers/models",
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
 };
 
 export const Audit = {

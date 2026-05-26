@@ -53,11 +53,11 @@
 | 业务类型 | Provider | 模型 |
 |---------|---------|------|
 | comment / nickname / bio | Grok | `grok-4-fast-non-reasoning` |
-| avatar | Gemini Vision | `gemini-2.5-flash` |
+| avatar | Gemini Vision | `gemini-2.5-flash-lite` |
 | media_analysis | IRC app: xAI only；auto app: Gemini / xAI | IRC 使用 `grok-4`，不 fallback Gemini |
 | media_intro | IRC app: xAI only；auto app: xAI / Gemini | IRC 使用 `grok-4-fast-non-reasoning`，不 fallback Gemini |
 
-Provider 可在 Admin API / wrangler.toml `[vars]` 热切换，无需改代码。
+Gemini 模型可在 Admin UI `/providers` 或 Admin API `PATCH /admin/providers/models` 热切换；默认使用 `gemini-2.5-flash-lite`。
 
 ## D1 初始状态
 
