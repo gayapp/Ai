@@ -227,6 +227,43 @@ async function checkAnalyzeAndAlert(
     .bind(from)
     .all<{ error_code: string | null; n: number }>();
 
+  const unexpectedProviders = await env.DB.prepare(
+    `SELECT a.id AS app_id, a.name AS app_name, COUNT(*) AS n, MAX(r.created_at) AS latest_at
+     FROM analyze_requests r
+     JOIN apps a ON a.id = r.app_id
+     WHERE r.created_at >= ?
+       AND a.provider_strategy = 'grok'
+       AND r.provider = 'gemini'
+     GROUP BY a.id, a.name
+     ORDER BY n DESC
+     LIMIT 5`,
+  )
+    .bind(from)
+    .all<{ app_id: string; app_name: string | null; n: number; latest_at: number | null }>();
+
+  const unexpectedTotal = unexpectedProviders.results.reduce((sum, r) => sum + Number(r.n || 0), 0);
+  checks.push(`analyze grok_strategy_gemini=${unexpectedTotal}`);
+  if (unexpectedTotal > 0) {
+    const ok = await sendTelegramAlert(
+      env,
+      {
+        title: "ai-guard · analyze provider route mismatch",
+        level: "crit",
+        lines: [
+          `Window: last ${windowMinutes} minutes`,
+          `Requests on Gemini despite provider_strategy=grok: ${unexpectedTotal}`,
+          `Apps: ${formatUnexpectedProviders(unexpectedProviders.results)}`,
+          "Expected: xAI/Grok only; no Gemini fallback",
+          "Investigate: https://aicenter.1.gay/#/analyze-records",
+        ],
+        dedupKey: "analyze-grok-strategy-gemini",
+        dedupTtlSeconds: 900,
+      },
+      env.DEDUP_CACHE,
+    );
+    if (ok) fired.push("analyze-provider-mismatch");
+  }
+
   if (!row || row.total < thresholds.analyzeMinSample) {
     checks.push(`analyze samples=${row?.total ?? 0} < min=${thresholds.analyzeMinSample} -> skip rate`);
   } else {
@@ -380,6 +417,14 @@ async function checkAnalyzeAndAlert(
 
 function formatErrorCodes(rows: Array<{ error_code: string | null; n: number }>): string {
   return rows.map((r) => `${r.error_code ?? "unknown"}=${r.n}`).join(", ");
+}
+
+function formatUnexpectedProviders(
+  rows: Array<{ app_id: string; app_name: string | null; n: number; latest_at: number | null }>,
+): string {
+  return rows
+    .map((r) => `${r.app_name || r.app_id}=${r.n} latest=${formatTimestamp(r.latest_at)}`)
+    .join(", ");
 }
 
 function formatTimestamp(ms: number | null): string {

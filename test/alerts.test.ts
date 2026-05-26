@@ -19,6 +19,7 @@ class FakeD1 {
       moderation: { total: number; errors: number; avg_lat: number; max_lat: number };
       analyze: { total: number; errors: number; pending: number; avg_lat: number; max_lat: number };
       analyzeErrorCodes?: Array<{ error_code: string | null; n: number }>;
+      unexpectedProviders?: Array<{ app_id: string; app_name: string | null; n: number; latest_at: number | null }>;
       backlog?: {
         pending_older: number;
         oldest_pending_at: number | null;
@@ -66,6 +67,9 @@ class FakeStmt {
   }
 
   async all<T>(): Promise<{ results: T[] }> {
+    if (this.sql.includes("provider_strategy = 'grok'")) {
+      return { results: (this.rows.unexpectedProviders ?? []) as T[] };
+    }
     if (this.sql.includes("GROUP BY error_code")) {
       return { results: (this.rows.analyzeErrorCodes ?? []) as T[] };
     }
@@ -128,6 +132,31 @@ describe("alert checks", () => {
       "analyze-callback-undelivered",
     ]));
     expect(sent).toHaveLength(3);
+  });
+
+  it("alerts when grok strategy analyze traffic reaches Gemini", async () => {
+    const sent: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)));
+      return new Response("{}", { status: 200 });
+    }));
+
+    const env = makeEnv({
+      moderation: { total: 0, errors: 0, avg_lat: 0, max_lat: 0 },
+      analyze: { total: 40, errors: 0, pending: 0, avg_lat: 1000, max_lat: 2000 },
+      unexpectedProviders: [{
+        app_id: "app_irc",
+        app_name: "IRC",
+        n: 2,
+        latest_at: Date.now(),
+      }],
+    });
+    const result = await checkAndAlert(env);
+
+    expect(result.checks).toContain("analyze grok_strategy_gemini=2");
+    expect(result.fired).toContain("analyze-provider-mismatch");
+    expect(sent).toHaveLength(1);
+    expect((sent[0] as { text: string }).text).toContain("provider\\_strategy=grok");
   });
 });
 

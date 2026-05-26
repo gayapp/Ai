@@ -27,6 +27,7 @@
 触发频率：
 - Cron `*/5 * * * *` — 错误率/延迟检查
 - Cron `*/5 * * * *` — analyze 错误率、延迟与 backlog 检查
+- Cron `*/5 * * * *` — analyze provider route mismatch：`provider_strategy=grok` 的 app 若出现 `provider=gemini`，立即推 Telegram
 - Cron `*/5 * * * *` — moderate pending sweep：把 >5 分钟未完成的请求标记为 `error/pending_timeout`，重新入队 callback，并发送 Telegram
 - Cron `*/5 * * * *` — analyze pending sweep：把 >5 分钟仍 pending 的 analyze request 重新入 `ANALYZE_QUEUE`，provider 恢复后自动追赶
 - Cron `*/5 * * * *` — analyze callback sweep：把卡在 `attempts=0` 或到达 `next_retry_at` 的 analyze callback delivery 重新入队
