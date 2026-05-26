@@ -13,6 +13,7 @@
 import type { Provider } from "../moderation/schema.ts";
 import { sendTelegramAlert } from "./telegram.ts";
 import { sendAlertEmail } from "./email.ts";
+import { createGeminiAdapter } from "../providers/gemini.ts";
 
 const AUTH_ALERT_DEDUP_TTL = 10 * 60; // 10 分钟内同 provider 不重复发
 
@@ -120,35 +121,17 @@ async function checkGemini(env: Env): Promise<{
   if (!key) return { ok: false, reason: "GEMINI_API_KEY not set" };
 
   try {
-    // 发一个最小的 prompt（约 10 token），response_format 强制 JSON 只让它回 "{}"
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${
-      env.GEMINI_MODEL || "gemini-2.5-flash"
-    }:generateContent?key=${key}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: "ping" }] }],
-        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 4 },
-      }),
-      signal: AbortSignal.timeout(8000),
+    await createGeminiAdapter(env).moderate({
+      systemPrompt: "Return a valid moderation JSON object for this health check.",
+      content: "health check",
+      isImage: false,
+      timeoutMs: 8000,
     });
-    if (res.status === 401 || res.status === 403) {
-      return { ok: false, reason: `key unauthorized (http ${res.status})` };
-    }
-    const text = await res.text();
-    if (
-      res.status === 400 &&
-      /API_KEY_INVALID|API key not valid|PERMISSION_DENIED/i.test(text)
-    ) {
-      return { ok: false, reason: "API_KEY_INVALID" };
-    }
-    if (!res.ok) return { ok: false, reason: `http ${res.status}` };
     return { ok: true };
   } catch (e) {
     return {
       ok: false,
-      reason: `check request failed: ${e instanceof Error ? e.message : String(e)}`,
+      reason: e instanceof Error ? e.message : String(e),
     };
   }
 }
