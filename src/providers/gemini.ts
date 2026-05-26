@@ -52,7 +52,7 @@ export function createGeminiAdapter(env: Env): ProviderAdapter {
         throw new AppError(
           ErrorCodes.PROVIDER_ERROR,
           502,
-          `gemini http ${res.status}`,
+          formatGeminiHttpError(res.status, text),
           text.slice(0, 500),
         );
       }
@@ -99,6 +99,10 @@ async function fetchGeminiWithRetry(
       );
     }
 
+    if (res.status === 429 && attempt < maxAttempts) {
+      const text = await res.clone().text().catch(() => "");
+      if (isLongQuotaExhausted(text)) return res;
+    }
     if (!isRetryableGeminiStatus(res.status) || attempt === maxAttempts) {
       return res;
     }
@@ -109,6 +113,23 @@ async function fetchGeminiWithRetry(
 
 function isRetryableGeminiStatus(status: number): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function isLongQuotaExhausted(text: string): boolean {
+  return /generate_requests_per_model_per_day|GenerateRequestsPerDayPerProjectPerModel/i.test(text) ||
+    /retryDelay"\s*:\s*"\d{4,}s"/i.test(text);
+}
+
+function formatGeminiHttpError(status: number, text: string): string {
+  if (status !== 429) return `gemini http ${status}`;
+  const metric = text.match(/Quota exceeded for metric:\s*([^,\n]+)/i)?.[1]?.trim();
+  const retry = text.match(/Please retry in\s*([^.]+)\./i)?.[1]?.trim() ||
+    text.match(/"retryDelay"\s*:\s*"([^"]+)"/i)?.[1]?.trim();
+  return [
+    "gemini quota/rate limited (http 429)",
+    metric ? `metric=${metric}` : null,
+    retry ? `retry_in=${retry}` : null,
+  ].filter(Boolean).join(", ");
 }
 
 function retryDelayMs(attempt: number): number {
