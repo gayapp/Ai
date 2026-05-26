@@ -63,8 +63,11 @@ async function dryRunModerate(
   const provider = Provider.parse(body.provider);
   const adapter = getAdapter(env, provider);
   const isImage = bizType === "avatar";
-  const results = await Promise.all(
-    body.samples.map(async (sample) => {
+  const concurrency = provider === "gemini" ? 1 : 4;
+  const results = await mapWithConcurrency(
+    body.samples,
+    concurrency,
+    async (sample) => {
       try {
         const r = await adapter.moderate({
           systemPrompt: body.content,
@@ -91,7 +94,7 @@ async function dryRunModerate(
       } catch (e) {
         return { sample, error: e instanceof Error ? e.message : String(e) };
       }
-    }),
+    },
   );
   return results;
 }
@@ -101,8 +104,11 @@ async function dryRunMediaIntro(
   body: PromptDryRunInput,
 ): Promise<Array<Record<string, unknown>>> {
   const provider = z.enum(["xai", "gemini"]).parse(body.provider);
-  return await Promise.all(
-    body.samples.map(async (sample) => {
+  const concurrency = provider === "gemini" ? 1 : 4;
+  return await mapWithConcurrency(
+    body.samples,
+    concurrency,
+    async (sample) => {
       try {
         const inputRaw = parseJsonSample(sample);
         const input = MediaIntroInput.parse(inputRaw);
@@ -130,7 +136,7 @@ async function dryRunMediaIntro(
           error: e instanceof Error ? e.message : String(e),
         };
       }
-    }),
+    },
   );
 }
 
@@ -185,4 +191,21 @@ function parseJsonText(raw: string): unknown {
     text = text.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "").trim();
   }
   return JSON.parse(text);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]!, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }

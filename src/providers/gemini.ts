@@ -35,25 +35,7 @@ export function createGeminiAdapter(env: Env): ProviderAdapter {
       };
 
       const startedAt = Date.now();
-      let res: Response;
-      try {
-        res = await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(args.timeoutMs),
-        });
-      } catch (e) {
-        if (e instanceof Error && e.name === "TimeoutError") {
-          throw new AppError(ErrorCodes.PROVIDER_TIMEOUT, 504, "gemini timeout");
-        }
-        throw new AppError(
-          ErrorCodes.PROVIDER_ERROR,
-          502,
-          `gemini fetch: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
-
+      const res = await fetchGeminiWithRetry(url, body, args.timeoutMs);
       const latencyMs = Date.now() - startedAt;
       if (!res.ok) {
         const text = await safeText(res);
@@ -85,6 +67,56 @@ export function createGeminiAdapter(env: Env): ProviderAdapter {
       };
     },
   };
+}
+
+async function fetchGeminiWithRetry(
+  url: string,
+  body: unknown,
+  timeoutMs: number,
+): Promise<Response> {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (e) {
+      if (e instanceof Error && e.name === "TimeoutError") {
+        throw new AppError(ErrorCodes.PROVIDER_TIMEOUT, 504, "gemini timeout");
+      }
+      if (attempt < maxAttempts) {
+        await sleep(retryDelayMs(attempt));
+        continue;
+      }
+      throw new AppError(
+        ErrorCodes.PROVIDER_ERROR,
+        502,
+        `gemini fetch: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    if (!isRetryableGeminiStatus(res.status) || attempt === maxAttempts) {
+      return res;
+    }
+    await sleep(retryDelayMs(attempt));
+  }
+  throw new AppError(ErrorCodes.PROVIDER_ERROR, 502, "gemini retry exhausted");
+}
+
+function isRetryableGeminiStatus(status: number): boolean {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function retryDelayMs(attempt: number): number {
+  return 250 * 2 ** (attempt - 1);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 interface GeminiResponse {
