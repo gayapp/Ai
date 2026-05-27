@@ -24,6 +24,7 @@
 | 附加 · Provider 凭证失效检测 + Telegram 告警 | ✅ 已上线 |
 | 附加 · pending 残留自动扫尾（Cron 5min） | ✅ 已上线 |
 | 附加 · 监控告警链路修复（pull-unacked SQL + moderation 窗口 + 周心跳） | ✅ 已上线 2026-05-26（详见 [monitoring-followups-2026-05-26.md](monitoring-followups-2026-05-26.md)） |
+| 附加 · 5min provider-health + team_blocked 专项告警 + 24h 复发 escalate + gemini 安全过滤 fallback（M8/M11/M12/M13） | ✅ 已上线 2026-05-27（commit `69d3967`, version `4db2d7b8`；详见 [monitoring-followups-2026-05-26.md](monitoring-followups-2026-05-26.md)） |
 
 **本阶段焦点**：让 P0.2 CSAM 扫描在 Dashboard 里开启，整个合规+成本闭环就收尾了。
 

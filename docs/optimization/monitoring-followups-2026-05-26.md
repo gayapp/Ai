@@ -8,6 +8,10 @@
 
 | 项 | 修复 | 版本 / commit |
 |---|---|---|
+| M8 · provider-health cron 从 hourly → 每 5 min（事故 2026-05-26 发现的 26 min 检测盲区） | 去掉 `src/index.ts` 里 `isHourTick` 闸门 | commit `69d3967`，prod version `4db2d7b8`（2026-05-27 17:06Z） |
+| M11 · xAI `team_blocked` 专项实时 crit 告警 | `checkXai` 拆分 reason 枚举；`team_blocked` 单独走 🚨🚨 标题 + console.x.ai 链接；dedupTtl 统一 600s 配合 5min cron | commit `69d3967`，prod version `4db2d7b8`（2026-05-27 17:06Z） |
+| M12 · 同根因 24h 内复发自动 escalate | DEDUP_CACHE 写 `recur-count:<provider>:<reason>` 24h TTL，≥2 次标题加「⚠️⚠️ 复发 (24h 内 N 次)」并强制 crit。`checkProviderHealth` + `alertProviderAuthFailed` 均接入 | commit `69d3967`，prod version `4db2d7b8`（2026-05-27 17:06Z） |
+| M13 · moderation fallback gemini 安全过滤 400 → status=review（不再标 error） | `pipeline.ts` fallback catch 里识别 `http 400` + body 含 `safety/blocked/INVALID_ARGUMENT`，合成 `{status:"review",risk_level:"medium",categories:["other"],provider:"gemini",prompt_version:null}`。其他 400 仍按 PROVIDER_ERROR 走 | commit `69d3967`，prod version `4db2d7b8`（2026-05-27 17:06Z） |
 | `wrangler secret put` 通过 PowerShell pipe 上传带尾换行，Bearer 头畸形 401 | 改走 Cloudflare REST API `PUT /workers/scripts/.../secrets`，精确字节上传 | 2026-05-18，记入 memory `wrangler-secret-put-newline-pwsh` |
 | analyze pull-unacked alert SQL 把 `delivery_mode=both AND delivered_at IS NOT NULL` 剔除，导致 IRC ack 漏做 22h 内 1124 条静默累积 | SQL 改为 `delivery_mode IN ('pull','both')`，不再按 callback 投递状态过滤 | version `43b79366`（2026-05-26 prod） |
 | moderation 流量稀疏（30 min 才 0-7 单），`sampleWindowMs=5min` / `minSample=20` 导致告警永远 skip → 100% 失败也无声 | 拆出 `moderationSampleWindowMs=30min`，`minSample` 20→5 | version `3139eb2a`（2026-05-26 prod） |
@@ -89,13 +93,6 @@
 - 影响 [src/analyze/pipeline/media-analysis.ts:150-154](../../src/analyze/pipeline/media-analysis.ts#L150-L154) 处
 - 风险：会增加 pending 池规模，需要配合 pending sweep 的超时阈值调整
 
-#### M8 · provider-health cron 拉到每 5 分钟（事故衍生）
-- **现状**：[src/index.ts:294-303](../../src/index.ts#L294-L303) 通过 `isHourTick = now.getUTCMinutes() < 1` 限制只在 xx:00 那次 cron 跑 `checkProviderHealth`
-- **本次事故**：xAI `team_blocked=true` 发生于 21:34Z，要等到 22:00Z 才会被主动巡检发现——**理论上有 26 分钟知情盲区**（实际本次靠 `pending-timeout` 间接告警在 T+5 抓到）
-- **改法**：去掉 `isHourTick` 闸门，让 provider-health 跟 alert check 一样每 5 min 跑一次。`checkProviderHealth` 每次 2 个 HTTP 调用（xAI + Gemini），成本可忽略
-- **风险**：xAI / Gemini 的 health endpoint 自身被频繁打可能引起小规模限流；可设短超时 + 软失败
-- **收益**：把"team blocked / key disabled"这类**根因告警**前置 25 分钟。比依赖 `pending-timeout` 这种症状告警更直接
-
 #### M9 · pending sweep 阈值与 cron 频率错位（事故衍生）
 - **现状**：sweep 把 `pending > 5min` 标为 `pending_timeout`，cron 也是 `*/5 * * * *`——理论可能恰好慢一拍把"刚要被队列重试成功"的请求标错为 error
 - **本次事故**：363 条 pending 中 0 条最终被 sweep 标 error，恰好运气。但若 xAI 恢复再晚 5 min，sweep 就会击中
@@ -112,30 +109,6 @@
   - (c) 加 latency-based circuit（连续 N 次 > 阈值也 open）
 - **配合 M1**：如果同时让 strategy=grok 的 fallback 不为 null，部分降级时就能自动切 gemini，减少业务感知
 - **优先级**：P3，因为熔断目前是"防止持续打不通"，不是"加速切换"
-
-#### M11 · xAI team_blocked **专项实时告警**（事故衍生 · 紧急）
-- **现状**：worker 已有 `checkProviderHealth` 检测 `team_blocked` 并触发 `health:grok:team_blocked` Telegram 告警，但只在 cron `xx:00` 跑（M8 拟改 5min）
-- **问题**：team_blocked 是**最严重**的 provider 失败类（不是 key 单点失效，而是整个组织被屏蔽），24h 内已两次出现，应升级为 `crit` 级独立告警，而不是埋在通用 `provider 健康异常` 里
-- **改法**：
-  - 在 [provider-health.ts:checkXai](../../src/alerts/provider-health.ts) 里把 `team_blocked` 单独拎出，dedupKey 改为 `health:grok:team_blocked`（已经是），但 dedupTtl 降到 5min（让恢复后再屏蔽能再次报）
-  - alertProviderAuthFailed 走的是实时路径，team_blocked 应该模仿它走 worker 调用 grok 时也能识别（看 401/403 + body 含 `team_blocked` 直接 crit 告警）
-- **优先级**：和 M8 一起做。两次复发 = 必修
-
-#### M12 · 24h 内复发的 provider 事件应自动 escalate
-- **观察**：2026-05-26 21:34Z 第一次 team_blocked → 自愈；19h 后再来一次（2026-05-27 16:22Z）
-- **当前告警**：每次都 dedup 30 min，所以两次告警之间不联动
-- **改法**：worker `recordAuthFailure` / `recordTeamBlocked` 时把"最近 24h 同类事件计数"写进 KV（5min TTL），第二次同根因事件触发"⚠️⚠️ 复发"加重告警，提示用户去查根因（账单 / xAI Console）而不是只看到孤立告警
-- **优先级**：和 M11 一起做
-
-#### M13 · moderation 路径：gemini 400 fallback 失败处理
-- **观察**：grok 不可用 → fallback gemini → gemini 返 400 → 整条请求标 error
-- **样本**：今天 16:15-16:16Z 两条 comment moderation 全死于 `gemini http 400`
-- **原因**：gemini 对部分 NSFW comment 内容直接拒（safety filter），不会返回 JSON
-- **改法**：
-  - (a) 把 gemini 400 + safety filter 触发当 "暂时返 pass+review"，避免阻塞业务
-  - (b) 或：检测 grok team_blocked 时**只**返回 503 而不调 gemini，让 IRC 业务侧自行处理
-  - 优先 (a)，更符合"成人男同平台不阻塞合法 NSFW"的定位
-- **优先级**：与 M3（双 provider down 行为优化）合并讨论
 
 #### M14 · 长尾低强度 saw-tooth 监控（chronic 状态）
 - **观察**：2026-05-27 04:38Z 起持续 7+ 小时 xAI 间歇性故障，pending5m 在 8-79 间震荡，错误率 0% 但 IRC 体验慢
