@@ -290,10 +290,10 @@ async function handleAnalyzeQueue(
 async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
   const cron = ev.cron;
 
-  // 每小时第 0 分钟跑 provider health；每 5 分钟跑阈值检查
-  const now = new Date(ev.scheduledTime);
-  const isHourTick = now.getUTCMinutes() < 1;
-  if (cron === "*/5 * * * *" && isHourTick) {
+  // provider-health 每 5 分钟跑一次 —— team_blocked / key disabled 这种根因故障
+  // 越早暴露越好，以前 xx:00 hourly 的方案有 26 min 检测盲区（事故 2026-05-26）。
+  // dedup 由 sendTelegramAlert 自身的 dedupKey/TTL 控制，5min 节奏不会刷屏。
+  if (cron === "*/5 * * * *") {
     try {
       const r = await checkProviderHealth(env);
       console.log("[scheduled] provider health:", JSON.stringify({ grok: r.grok.ok, gemini: r.gemini.ok, fired: r.fired }));

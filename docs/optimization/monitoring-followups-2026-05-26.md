@@ -17,6 +17,30 @@
 
 ## 事故复盘
 
+### 2026-05-27 16:22Z+ · xAI team_blocked 第二次（24h 内复发）
+
+**时间线**（UTC，事件仍在进行中）：
+
+| 时刻 | 事件 | pending | 备注 |
+|---|---|---|---|
+| ~16:20 | xAI 又返 `team_blocked=true` | 累积起步 | 距上次事件（05-26 21:34Z）约 19 小时 |
+| 16:22 (T+~5) | /loop 巡检捕获 `pending>5m=169` | 169 | mod 也 2/2 100% 错（fallback gemini 400） |
+| 16:37 (T+~20) | pending5m **409**, total 493 | 493 | 15 min 内 +240，事故仍在扩散 |
+
+**未自愈时记录到的特征**：
+- 上次自愈用了 33 分钟；此次超过此线后仍未恢复，发文档时事故仍 ongoing
+- moderation comment 路径暴露：grok 主 → fallback gemini，但 gemini 对 NSFW comment 返 `http 400`，因此 mod 也直接 100% err（不是 pending）
+- `provider="(null)"` 占绝大多数 pending — 请求在 worker 队列侧重试 xAI 但都失败
+
+**与 2026-05-26 21:34Z 那次同根因**：xAI 平台层对该账号 team-level 屏蔽。**24h 内两次** = 不是偶发，根因极可能在账号侧（billing / 信用卡 / xAI 风控）。
+
+**根因评估**：
+- ai-guard 端无法预防或加速恢复
+- 现有 ai-guard 端兜底（队列重试 + sweep）在长时间 team_blocked 下能保 0 error 但 pending 池会爆
+- 需要新优化项 M11-M13，详见下方
+
+---
+
 ### 2026-05-26 21:34 ~ 22:37Z · xAI team_blocked 短期故障
 
 **时间线**（UTC）：
@@ -88,6 +112,39 @@
   - (c) 加 latency-based circuit（连续 N 次 > 阈值也 open）
 - **配合 M1**：如果同时让 strategy=grok 的 fallback 不为 null，部分降级时就能自动切 gemini，减少业务感知
 - **优先级**：P3，因为熔断目前是"防止持续打不通"，不是"加速切换"
+
+#### M11 · xAI team_blocked **专项实时告警**（事故衍生 · 紧急）
+- **现状**：worker 已有 `checkProviderHealth` 检测 `team_blocked` 并触发 `health:grok:team_blocked` Telegram 告警，但只在 cron `xx:00` 跑（M8 拟改 5min）
+- **问题**：team_blocked 是**最严重**的 provider 失败类（不是 key 单点失效，而是整个组织被屏蔽），24h 内已两次出现，应升级为 `crit` 级独立告警，而不是埋在通用 `provider 健康异常` 里
+- **改法**：
+  - 在 [provider-health.ts:checkXai](../../src/alerts/provider-health.ts) 里把 `team_blocked` 单独拎出，dedupKey 改为 `health:grok:team_blocked`（已经是），但 dedupTtl 降到 5min（让恢复后再屏蔽能再次报）
+  - alertProviderAuthFailed 走的是实时路径，team_blocked 应该模仿它走 worker 调用 grok 时也能识别（看 401/403 + body 含 `team_blocked` 直接 crit 告警）
+- **优先级**：和 M8 一起做。两次复发 = 必修
+
+#### M12 · 24h 内复发的 provider 事件应自动 escalate
+- **观察**：2026-05-26 21:34Z 第一次 team_blocked → 自愈；19h 后再来一次（2026-05-27 16:22Z）
+- **当前告警**：每次都 dedup 30 min，所以两次告警之间不联动
+- **改法**：worker `recordAuthFailure` / `recordTeamBlocked` 时把"最近 24h 同类事件计数"写进 KV（5min TTL），第二次同根因事件触发"⚠️⚠️ 复发"加重告警，提示用户去查根因（账单 / xAI Console）而不是只看到孤立告警
+- **优先级**：和 M11 一起做
+
+#### M13 · moderation 路径：gemini 400 fallback 失败处理
+- **观察**：grok 不可用 → fallback gemini → gemini 返 400 → 整条请求标 error
+- **样本**：今天 16:15-16:16Z 两条 comment moderation 全死于 `gemini http 400`
+- **原因**：gemini 对部分 NSFW comment 内容直接拒（safety filter），不会返回 JSON
+- **改法**：
+  - (a) 把 gemini 400 + safety filter 触发当 "暂时返 pass+review"，避免阻塞业务
+  - (b) 或：检测 grok team_blocked 时**只**返回 503 而不调 gemini，让 IRC 业务侧自行处理
+  - 优先 (a)，更符合"成人男同平台不阻塞合法 NSFW"的定位
+- **优先级**：与 M3（双 provider down 行为优化）合并讨论
+
+#### M14 · 长尾低强度 saw-tooth 监控（chronic 状态）
+- **观察**：2026-05-27 04:38Z 起持续 7+ 小时 xAI 间歇性故障，pending5m 在 8-79 间震荡，错误率 0% 但 IRC 体验慢
+- **特征**：不触发现有任何阈值告警（err_rate 0% 因为重试覆盖；pending<200 不触发突发告警）
+- **现实风险**：长尾期间 IRC 业务体感延迟从平时 ~2s 拖到 ~30s+，但 ai-guard 报告全绿
+- **改法**：
+  - (a) 加 "持续 3h 内 pending5m 平均 >20" 阈值告警
+  - (b) 或 Admin UI Dashboard 加 "pending 滑动窗" 趋势图，让人眼能看出 saw-tooth
+- **优先级**：P3，体验问题不是 SLA
 
 ### 🟢 P3 — 按需再做（小修小补）
 

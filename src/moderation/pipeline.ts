@@ -66,9 +66,43 @@ export async function executeModeration(
           "both providers failed authentication — platform tokens invalid/expired, please wait",
         );
       }
+      // M13: fallback gemini 因 safety filter 拒答（http 400 + body 含 safety 关键字）
+      //   → 不当 error，合成 review 让运营复审。
+      //   合法 NSFW 是本平台的常态，不能因为 gemini 不愿意处理就阻塞业务。
+      const synthesized = synthesizeGeminiSafetyReview(fbErr, route.fallback);
+      if (synthesized) return synthesized;
       throw fbErr;
     }
   }
+}
+
+/**
+ * 仅在 fallback==="gemini" 且 fbErr 是 gemini http 400 + body 含 safety 关键字时，
+ * 返回合成的 review 结果；其他情况返回 null 让调用方继续抛 fbErr。
+ */
+function synthesizeGeminiSafetyReview(
+  fbErr: unknown,
+  fallback: Provider,
+): ExecutionResult | null {
+  if (fallback !== "gemini") return null;
+  if (!(fbErr instanceof AppError)) return null;
+  if (fbErr.code !== ErrorCodes.PROVIDER_ERROR) return null;
+  if (!/http\s+400/i.test(fbErr.message)) return null;
+  const body = typeof fbErr.details === "string" ? fbErr.details : "";
+  if (!/safety|blocked|INVALID_ARGUMENT/i.test(body)) return null;
+  console.warn("[pipeline] gemini safety filter declined fallback — returning synthesized review");
+  return {
+    status: "review",
+    risk_level: "medium",
+    categories: ["other"],
+    reason: "provider safety filter declined",
+    provider: "gemini",
+    model: null,
+    prompt_version: null,
+    input_tokens: 0,
+    output_tokens: 0,
+    latency_ms: 0,
+  };
 }
 
 async function tryProvider(
