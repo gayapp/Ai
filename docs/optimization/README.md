@@ -23,6 +23,7 @@
 | P2.3 · 极简降级模式 | ⚪ 按需 |
 | 附加 · Provider 凭证失效检测 + Telegram 告警 | ✅ 已上线 |
 | 附加 · pending 残留自动扫尾（Cron 5min） | ✅ 已上线 |
+| 附加 · 监控告警链路修复（pull-unacked SQL + moderation 窗口 + 周心跳） | ✅ 已上线 2026-05-26（详见 [monitoring-followups-2026-05-26.md](monitoring-followups-2026-05-26.md)） |
 
 **本阶段焦点**：让 P0.2 CSAM 扫描在 Dashboard 里开启，整个合规+成本闭环就收尾了。
 

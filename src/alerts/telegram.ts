@@ -84,8 +84,9 @@ async function safeText(res: Response): Promise<string> {
 export interface AlertThresholds {
   errorRatePct: number;   // 5 = 5%
   p95LatencyMs: number;   // 15000 = 15s (Gemini)
-  sampleWindowMs: number; // 5 * 60 * 1000
-  minSample: number;      // require at least N requests in window
+  sampleWindowMs: number; // analyze 用 5 * 60 * 1000
+  moderationSampleWindowMs: number; // moderation 流量稀疏，30min 窗口给足样本
+  minSample: number;      // moderation 最少样本
   dlqNonEmpty: boolean;   // fire on any DLQ content
   analyzeErrorRatePct: number;
   analyzeLatencyMs: number;
@@ -102,7 +103,8 @@ export const DEFAULT_THRESHOLDS: AlertThresholds = {
   errorRatePct: 5,
   p95LatencyMs: 15_000,
   sampleWindowMs: 5 * 60 * 1000,
-  minSample: 20,
+  moderationSampleWindowMs: 30 * 60 * 1000,
+  minSample: 5,
   dlqNonEmpty: true,
   analyzeErrorRatePct: 5,
   analyzeLatencyMs: 90_000,
@@ -120,7 +122,8 @@ export async function checkAndAlert(
   thresholds: AlertThresholds = DEFAULT_THRESHOLDS,
 ): Promise<{ checks: string[]; fired: string[] }> {
   const now = Date.now();
-  const from = now - thresholds.sampleWindowMs;
+  const moderationWindow = thresholds.moderationSampleWindowMs ?? thresholds.sampleWindowMs;
+  const from = now - moderationWindow;
 
   const row = await env.DB.prepare(
     `SELECT
@@ -152,7 +155,7 @@ export async function checkAndAlert(
           title: "ai-guard · 错误率告警",
           level: errRatePct >= 20 ? "crit" : "warn",
           lines: [
-            `时间窗口: 最近 ${thresholds.sampleWindowMs / 60000} 分钟`,
+            `时间窗口: 最近 ${Math.round(moderationWindow / 60000)} 分钟`,
             `请求总数: ${row.total}`,
             `错误数: ${row.errors}`,
             `错误率: ${errRatePct.toFixed(2)}%（阈值 ${thresholds.errorRatePct}%）`,
@@ -173,7 +176,7 @@ export async function checkAndAlert(
           title: "ai-guard · 延迟告警",
           level: "warn",
           lines: [
-            `时间窗口: 最近 ${thresholds.sampleWindowMs / 60000} 分钟`,
+            `时间窗口: 最近 ${Math.round(moderationWindow / 60000)} 分钟`,
             `最高延迟: ${row.max_lat}ms（阈值 ${thresholds.p95LatencyMs}ms）`,
             `平均延迟: ${Math.round(row.avg_lat)}ms`,
             `样本数: ${row.total}`,
@@ -324,12 +327,12 @@ async function checkAnalyzeAndAlert(
     `SELECT
        COALESCE(SUM(CASE WHEN status = 'pending' AND created_at < ? THEN 1 ELSE 0 END), 0) AS pending_older,
        MIN(CASE WHEN status = 'pending' THEN created_at END) AS oldest_pending_at,
-       COALESCE(SUM(CASE WHEN status IN ('ok','error') AND acked_at IS NULL AND created_at < ? AND (
-         delivery_mode = 'pull' OR (delivery_mode = 'both' AND delivered_at IS NULL)
-       ) THEN 1 ELSE 0 END), 0) AS pull_unacked_older,
-       MIN(CASE WHEN status IN ('ok','error') AND acked_at IS NULL AND (
-         delivery_mode = 'pull' OR (delivery_mode = 'both' AND delivered_at IS NULL)
-       ) THEN created_at END) AS oldest_pull_unacked_at,
+       COALESCE(SUM(CASE WHEN status IN ('ok','error') AND acked_at IS NULL AND created_at < ?
+         AND delivery_mode IN ('pull','both')
+       THEN 1 ELSE 0 END), 0) AS pull_unacked_older,
+       MIN(CASE WHEN status IN ('ok','error') AND acked_at IS NULL
+         AND delivery_mode IN ('pull','both')
+       THEN created_at END) AS oldest_pull_unacked_at,
        COALESCE(SUM(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL AND created_at < ? THEN 1 ELSE 0 END), 0) AS callback_undelivered_older,
        MIN(CASE WHEN status IN ('ok','error') AND delivery_mode IN ('callback','both') AND delivered_at IS NULL THEN created_at END) AS oldest_callback_undelivered_at
      FROM analyze_requests
@@ -413,6 +416,29 @@ async function checkAnalyzeAndAlert(
   }
 
   return { checks, fired };
+}
+
+/**
+ * 周心跳：证明告警通路（Telegram + KV dedup）活着。
+ * scheduled handler 每日调用，dedup ~6.5 天 → 实际 1 周一条。
+ * 若哪天 sendTelegramAlert 静默坏掉、KV 不通，就再也收不到这条；
+ * 也是用户判断"是真的安静还是告警死了"的唯一依据。
+ */
+export async function sendWeeklyHeartbeat(env: Env): Promise<boolean> {
+  return sendTelegramAlert(
+    env,
+    {
+      title: "ai-guard · 告警通路心跳",
+      level: "info",
+      lines: [
+        "看到这条 = Telegram + KV dedup + scheduled cron 都活着 ✅",
+        "下一条心跳约 7 天后。",
+      ],
+      dedupKey: "alert-heartbeat-weekly",
+      dedupTtlSeconds: 6 * 24 * 3600 + 12 * 3600,
+    },
+    env.DEDUP_CACHE,
+  );
 }
 
 function formatErrorCodes(rows: Array<{ error_code: string | null; n: number }>): string {

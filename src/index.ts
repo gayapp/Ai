@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import archHtml from "../docs/architecture.html";
 import { AppError, ErrorCodes } from "./lib/errors.ts";
-import { checkAndAlert, sendTelegramAlert } from "./alerts/telegram.ts";
+import { checkAndAlert, sendTelegramAlert, sendWeeklyHeartbeat } from "./alerts/telegram.ts";
 import { checkProviderHealth } from "./alerts/provider-health.ts";
 import { moderateRouter } from "./routes/moderate.ts";
 import { analyzeRouter } from "./routes/analyze.ts";
@@ -354,6 +354,12 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
       console.log("[scheduled] rollup:", JSON.stringify(r));
     } catch (e) {
       console.warn("[scheduled] rollup failed", e);
+    }
+    try {
+      const ok = await sendWeeklyHeartbeat(env);
+      if (ok) console.log("[scheduled] weekly heartbeat sent");
+    } catch (e) {
+      console.warn("[scheduled] heartbeat failed", e);
     }
     return;
   }
