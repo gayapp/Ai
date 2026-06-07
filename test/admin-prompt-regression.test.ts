@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { adminPromptRegressionRouter } from "../src/routes/admin-prompt-regression.ts";
 import { AppError, ErrorCodes } from "../src/lib/errors.ts";
 import type { PromptRegressionSetRow } from "../src/db/prompt-regression.ts";
@@ -140,6 +140,63 @@ describe("admin prompt regression", () => {
     expect(body.results[0].active.prompt_preview).toContain("Active media-analysis prompt");
     expect(body.results[0].draft.prompt_preview).toContain("Draft media-analysis prompt");
   });
+
+  it("matches expected objects as a subset of provider output", async () => {
+    const db = new FakeD1();
+    db.prompts.push({
+      biz_type: "bio",
+      provider: "grok",
+      version: 4,
+      content: "Active bio prompt",
+      is_active: 1,
+    });
+
+    const app = makeApp();
+    const create = await app.fetch(new Request("http://local/admin/prompt-regression", {
+      method: "POST",
+      headers: adminHeaders(),
+      body: JSON.stringify({
+        name: "bio subset expected",
+        biz_type: "bio",
+        provider: "grok",
+        samples: [{
+          name: "safe bio",
+          input: "I like movies and quiet weekends",
+          expected: { status: "pass", risk_level: "safe", categories: [] },
+        }],
+      }),
+    }), makeEnv(db));
+    const created = await create.json() as { id: number };
+
+    const output = JSON.stringify({
+      status: "pass",
+      risk_level: "safe",
+      categories: [],
+      reason: "ordinary profile text",
+    });
+    vi.stubGlobal("fetch", async () =>
+      Response.json({
+        choices: [{ message: { content: output } }],
+        model: "grok-test",
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      }));
+
+    const run = await app.fetch(new Request(`http://local/admin/prompt-regression/${created.id}/run`, {
+      method: "POST",
+      headers: adminHeaders(),
+      body: JSON.stringify({ draft_content: "Draft bio prompt" }),
+    }), makeEnv(db, { GROK_API_KEY: "grok-key", GROK_MODEL: "grok-test" }));
+    expect(run.status).toBe(200);
+    const body = await run.json() as {
+      summary: { active_expected_failures: number; draft_expected_failures: number };
+      results: Array<{ active_expected_match: boolean; draft_expected_match: boolean }>;
+    };
+
+    expect(body.summary.active_expected_failures).toBe(0);
+    expect(body.summary.draft_expected_failures).toBe(0);
+    expect(body.results[0].active_expected_match).toBe(true);
+    expect(body.results[0].draft_expected_match).toBe(true);
+  });
 });
 
 function makeApp(): Hono<{ Bindings: Env }> {
@@ -152,10 +209,11 @@ function makeApp(): Hono<{ Bindings: Env }> {
   return app;
 }
 
-function makeEnv(db: FakeD1): Env {
+function makeEnv(db: FakeD1, overrides: Partial<Env> = {}): Env {
   return {
     DB: db,
     ADMIN_TOKEN: "admin-token",
+    ...overrides,
   } as unknown as Env;
 }
 

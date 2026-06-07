@@ -13,7 +13,6 @@
 import type { Provider } from "../moderation/schema.ts";
 import { sendTelegramAlert } from "./telegram.ts";
 import { sendAlertEmail } from "./email.ts";
-import { createGeminiAdapter } from "../providers/gemini.ts";
 
 const AUTH_ALERT_DEDUP_TTL = 10 * 60; // 10 分钟内同 provider 不重复发
 const RECUR_WINDOW_SECONDS = 24 * 60 * 60; // 24h 复发计数窗
@@ -157,27 +156,11 @@ async function checkXai(env: Env): Promise<{
 /** Gemini 无公开 key-status 端点；只能用轻探（一个最小 prompt）。
  *  为避免巡检都在烧 Token，这里只做"存在性"校验 — 向 API 发一个带 key 的 HEAD，
  *  根据返回判断 key 是否有效。 */
-async function checkGemini(env: Env): Promise<{
+async function checkGemini(_env: Env): Promise<{
   ok: boolean;
   reason?: string;
 }> {
-  const key = env.GEMINI_API_KEY;
-  if (!key) return { ok: false, reason: "GEMINI_API_KEY not set" };
-
-  try {
-    await createGeminiAdapter(env).moderate({
-      systemPrompt: "Return a valid moderation JSON object for this health check.",
-      content: "health check",
-      isImage: false,
-      timeoutMs: 8000,
-    });
-    return { ok: true };
-  } catch (e) {
-    return {
-      ok: false,
-      reason: e instanceof Error ? e.message : String(e),
-    };
-  }
+  return { ok: true, reason: "skipped_gemini_sunset" };
 }
 
 export interface HealthReport {
@@ -195,7 +178,7 @@ export async function checkProviderHealth(env: Env): Promise<HealthReport> {
     const tgOk = await sendGrokHealthAlert(env, grok.reason, grok.detail, grok.raw);
     if (tgOk) fired.push(`grok:${grok.reason}`);
   }
-  if (!gemini.ok) {
+  if (!gemini.ok && gemini.reason !== "skipped_gemini_sunset") {
     const tgOk = await sendTelegramAlert(
       env,
       {

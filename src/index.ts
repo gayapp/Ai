@@ -34,6 +34,7 @@ import { processCallback, sweepAnalyzeCallbackDeliveries } from "./callback/disp
 import { saveAvatarEvidence } from "./evidence/r2.ts";
 import { sweepModerationPending } from "./moderation/pending-sweep.ts";
 import { rollupYesterday } from "./stats/rollup.ts";
+import { PENDING_COUNT_KV_KEY } from "./analyze/backpressure.ts";
 import { sweepAnalyzePending } from "./analyze/pending-sweep.ts";
 import { dispatchAnalyzeJob } from "./analyze/pipeline/dispatcher.ts";
 import type { AnalyzeJob } from "./analyze/types.ts";
@@ -319,10 +320,10 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
 
     try {
       const r = await sweepAnalyzePending(env);
-      if (r.enqueued > 0 || r.failed > 0) {
+      if (r.enqueued > 0 || r.failed > 0 || r.expired > 0) {
         console.log(
           `[scheduled] analyze pending sweep: scanned=${r.scanned}, ` +
-          `enqueued=${r.enqueued}, failed=${r.failed}`,
+          `enqueued=${r.enqueued}, expired=${r.expired}, failed=${r.failed}`,
         );
       }
     } catch (e) {
@@ -340,14 +341,37 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
     } catch (e) {
       console.warn("[scheduled] analyze callback sweep failed", e);
     }
+
+    // M3: pending pool count → NONCE KV，入口背压用。
+    //   每 5min 刷一次，避免每请求 SELECT COUNT(*) 拉延迟。expirationTtl 300s 与 cron 节奏对齐。
+    try {
+      const row = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM analyze_requests WHERE status = 'pending'`,
+      ).first<{ n: number }>();
+      const n = row?.n ?? 0;
+      await env.NONCE.put(PENDING_COUNT_KV_KEY, String(n), { expirationTtl: 300 });
+      console.log(`[scheduled] analyze pending count = ${n}`);
+    } catch (e) {
+      console.warn("[scheduled] analyze pending count write failed", e);
+    }
   }
 
   // "5 0 * * *" — daily cleanup + rollup
   if (cron === "5 0 * * *") {
-    // Cleanup old records (90d retention)
+    // Cleanup old records (90d retention). 每步独立 try/catch——D1 大表 DELETE
+    // 偶发 timeout/transient 不能把后续 rollup + heartbeat 一起拖死（事故 2026-05-31：
+    // stats_rollup 缺两天，怀疑就是 DELETE 抛错连带 rollup 没跑）。
     const cutoff = Date.now() - 90 * 24 * 3600 * 1000;
-    await env.DB.prepare(`DELETE FROM moderation_requests WHERE created_at < ?`).bind(cutoff).run();
-    await env.DB.prepare(`DELETE FROM callback_deliveries WHERE created_at < ?`).bind(cutoff).run();
+    try {
+      await env.DB.prepare(`DELETE FROM moderation_requests WHERE created_at < ?`).bind(cutoff).run();
+    } catch (e) {
+      console.warn("[scheduled] cleanup moderation_requests failed", e);
+    }
+    try {
+      await env.DB.prepare(`DELETE FROM callback_deliveries WHERE created_at < ?`).bind(cutoff).run();
+    } catch (e) {
+      console.warn("[scheduled] cleanup callback_deliveries failed", e);
+    }
     // Aggregate yesterday into stats_rollup
     try {
       const r = await rollupYesterday(env.DB);

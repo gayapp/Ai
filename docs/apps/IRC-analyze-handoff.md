@@ -30,6 +30,16 @@ provider_strategy: grok
 
 如果 IRC 需要与“一起看”正式应用隔离，应在 Admin UI `/apps` 新建独立 app：点击 `New app` 后使用 `IRC analyze` 预设，再把 `AI_GUARD_APP_ID` / secret 切到新 app。
 
+## apps 表 `biz_types` 字段语义（注意：不包括 analyze）
+
+IRC analyze app（如 `app_50b5c734c751d589`）的 `biz_types` 字段为 `[]`，**这是正确的配置，不是漏配**。
+
+- `apps.biz_types` 只控制 **moderation 接口** 的 biz 准入（见 [moderate.ts:44](../../src/routes/moderate.ts#L44)）。IRC 不调 moderation 接口，所以 `biz_types=[]`。
+- **analyze 接口不读这个字段** — analyze 准入通过 `prompts` 表 + `provider_strategy` 路由决定：只要 D1 里有该 `biz_type` 的 active prompt，且 app 的 `provider_strategy` 路由能解到可用 provider，请求就被接受。
+- IRC 使用 `media_analysis` 和 `media_intro` 这两个 analyze biz_type，是通过 `prompts` 表中存在对应 active 行启用的。
+
+未来若 Admin UI 想展示"该 app 开启了哪些 biz"，应分两块：moderation biz 来自 `apps.biz_types`，analyze biz 来自 `prompts` 表的 active 行 join。
+
 ## IRC 侧建议配置
 
 ```env

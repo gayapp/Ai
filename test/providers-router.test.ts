@@ -1,25 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { resolveAnalyzeRoute } from "../src/providers/router.ts";
+import { resolveAnalyzeRoute, resolveRoute } from "../src/providers/router.ts";
 
-describe("analyze provider routing", () => {
-  it("routes media_analysis to xAI only when strategy is grok", () => {
-    expect(resolveAnalyzeRoute("media_analysis", "grok")).toEqual({
-      primary: "xai",
-      fallback: null,
-    });
+// 2026-06-04 起平台下线 gemini，所有 strategy 退化为 xai/grok-only（无 fallback）。
+describe("analyze provider routing · xai-only", () => {
+  it("media_analysis → xAI only regardless of strategy", () => {
+    expect(resolveAnalyzeRoute("media_analysis", "grok")).toEqual({ primary: "xai", fallback: null });
+    expect(resolveAnalyzeRoute("media_analysis", "auto")).toEqual({ primary: "xai", fallback: null });
+    expect(resolveAnalyzeRoute("media_analysis", "gemini")).toEqual({ primary: "xai", fallback: null });
   });
 
-  it("routes media_intro to xAI only when strategy is grok", () => {
-    expect(resolveAnalyzeRoute("media_intro", "grok")).toEqual({
-      primary: "xai",
-      fallback: null,
-    });
+  it("media_intro → xAI only regardless of strategy", () => {
+    expect(resolveAnalyzeRoute("media_intro", "grok")).toEqual({ primary: "xai", fallback: null });
+    expect(resolveAnalyzeRoute("media_intro", "auto")).toEqual({ primary: "xai", fallback: null });
+  });
+});
+
+describe("moderation provider routing · grok-only", () => {
+  it("text biz_types → grok only", () => {
+    expect(resolveRoute("comment", "auto")).toEqual({ primary: "grok", fallback: null });
+    expect(resolveRoute("nickname", "grok")).toEqual({ primary: "grok", fallback: null });
+    expect(resolveRoute("bio", "gemini")).toEqual({ primary: "grok", fallback: null });
   });
 
-  it("routes media_intro to Gemini first when strategy is gemini", () => {
-    expect(resolveAnalyzeRoute("media_intro", "gemini")).toEqual({
-      primary: "gemini",
-      fallback: "xai",
-    });
+  it("avatar → grok-vision (grok-4) instead of gemini", () => {
+    expect(resolveRoute("avatar", "auto")).toEqual({ primary: "grok", fallback: null });
   });
 });

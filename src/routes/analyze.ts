@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { enforceRateLimit } from "../auth/rate-limit.ts";
 import { verifyAppRequest } from "../auth/hmac.ts";
+import { enforceBackpressure } from "../analyze/backpressure.ts";
 import { computeInputHash, canonicalJson } from "../analyze/dedup.ts";
 import {
   cacheMediaIntro,
@@ -38,6 +39,11 @@ analyzeRouter.post("/v1/analyze", async (c) => {
       `analyze biz_type '${parsed.biz_type}' not enabled for this app`,
     );
   }
+
+  // M3: pending pool 背压 — 鉴权/限流/参数校验通过后、写 D1 之前拦截。
+  //   设 X-Analyze-Backlog* header（每个响应都带）；池超 hard_limit 时返 503 让 IRC 退回持久队列。
+  const backpressureReject = await enforceBackpressure(c);
+  if (backpressureReject) return backpressureReject;
 
   const mediaIntroInput = parseMediaIntroInputIfNeeded(parsed);
   const deliveryMode = resolveDeliveryMode(app.delivery_mode, parsed.delivery_mode);

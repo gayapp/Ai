@@ -15,7 +15,7 @@ import {
   putDedup,
 } from "../moderation/dedup.ts";
 import { applyPrefilter } from "../moderation/prefilter.ts";
-import { executeModeration } from "../moderation/pipeline.ts";
+import { executeModeration, getErrorProvider } from "../moderation/pipeline.ts";
 import {
   recordCompleted,
   recordPending,
@@ -207,47 +207,51 @@ moderateRouter.post("/v1/moderate", async (c) => {
       );
     }
     // Record as error so stats don't leak "pending" rows.
-    // 用 waitUntil 保证客户端断开后写入也完成
+    // M18：用 await 确保 row 写完再响应。CF Workers `waitUntil` 不保证 100% 完成
+    //   （CPU 限额 / 客户端 abort / 平台重启可能丢），之前在 sync auto mode 下留过
+    //   1-4/天 pending_timeout 残单。sync API 客户端反正要等响应，+30-80ms D1 写延迟
+    //   完全淹没在 LLM 调用的几秒里。
+    // M27：如果 await 自身抛错（D1 transient outage），fallback 到 waitUntil 让平台
+    //   在后台再尝试一次；这样既保证 99% 同步落库，又对偶发 D1 抖动有兜底。
     const code = err instanceof AppError ? err.code : ErrorCodes.INTERNAL;
     const msg = err instanceof Error ? err.message : String(err);
-    c.executionCtx.waitUntil(
-      recordCompleted(c.env.DB, {
-        id: requestId,
-        cached: false,
-        status: "error",
-        risk_level: null,
-        categories: [],
-        reason: msg.slice(0, 256),
-        provider: null,
-        model: null,
-        prompt_version: null,
-        input_tokens: 0,
-        output_tokens: 0,
-        latency_ms: 0,
-        error_code: code,
-      }),
-    );
+    // M16(c): 从 AppError.details 提取真凶 provider；pipeline.tryProvider 已注入。
+    //   fallback 二次失败时拿到的是最后一个失败的 provider（fallback 的名字），与 IRC 实际感知一致。
+    const failedProvider = getErrorProvider(err);
+    await recordCompletedWithFallback(c, {
+      id: requestId,
+      cached: false,
+      status: "error",
+      risk_level: null,
+      categories: [],
+      reason: msg.slice(0, 256),
+      provider: failedProvider,
+      model: null,
+      prompt_version: null,
+      input_tokens: 0,
+      output_tokens: 0,
+      latency_ms: 0,
+      error_code: code,
+    });
     throw err;
   }
 
-  // Persist（用 waitUntil 保证客户端断开后写入也完成，避免 pending 残留）
-  c.executionCtx.waitUntil(
-    recordCompleted(c.env.DB, {
-      id: requestId,
-      cached: false,
-      status: result.status,
-      risk_level: result.risk_level,
-      categories: result.categories,
-      reason: result.reason,
-      provider: result.provider,
-      model: result.model,
-      prompt_version: result.prompt_version,
-      input_tokens: result.input_tokens,
-      output_tokens: result.output_tokens,
-      latency_ms: result.latency_ms,
-      error_code: result.error_code ?? null,
-    }),
-  );
+  // Persist（M18 + M27：await 写库 → 失败 fallback waitUntil；详见上方错误路径注释）
+  await recordCompletedWithFallback(c, {
+    id: requestId,
+    cached: false,
+    status: result.status,
+    risk_level: result.risk_level,
+    categories: result.categories,
+    reason: result.reason,
+    provider: result.provider,
+    model: result.model,
+    prompt_version: result.prompt_version,
+    input_tokens: result.input_tokens,
+    output_tokens: result.output_tokens,
+    latency_ms: result.latency_ms,
+    error_code: result.error_code ?? null,
+  });
 
   // Cache non-error successes (and only when we had a dedup key derived from
   // the primary prompt — fallback-only cases skip caching to keep the model set coherent)
@@ -276,6 +280,32 @@ moderateRouter.post("/v1/moderate", async (c) => {
     },
   });
 });
+
+/**
+ * M27: 写 moderation_requests 完成态。优先 await（M18），失败再 waitUntil 兜底。
+ *  - await 走通：客户端等几十 ms 拿响应，row 已 ok/error 落库
+ *  - await 抛错（D1 transient）：捕获 → 不让原响应失败 → waitUntil 后台重试
+ *  两层全失败时 row 留 pending，5min 后被 sweep 标 pending_timeout（基线噪声但不阻业务）
+ */
+async function recordCompletedWithFallback(
+  c: { env: Env; executionCtx: ExecutionContext },
+  args: Parameters<typeof recordCompleted>[1],
+): Promise<void> {
+  try {
+    await recordCompleted(c.env.DB, args);
+  } catch (writeErr) {
+    console.warn(
+      "[moderate] recordCompleted await failed; falling back to waitUntil",
+      args.id,
+      writeErr,
+    );
+    c.executionCtx.waitUntil(
+      recordCompleted(c.env.DB, args).catch((e) =>
+        console.warn("[moderate] recordCompleted fallback waitUntil also failed", args.id, e),
+      ),
+    );
+  }
+}
 
 // Query result by id (for async replay)
 moderateRouter.get("/v1/moderate/:id", async (c) => {

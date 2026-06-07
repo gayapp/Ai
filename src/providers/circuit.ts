@@ -14,7 +14,10 @@
 import type { AnalyzeBizType, AnalyzeProvider } from "../analyze/types.ts";
 import type { Provider } from "../moderation/schema.ts";
 
-const FAIL_THRESHOLD = 5;
+// M10（2026-06-03）：5→3。2026-05-26 21:34-22:07 xAI partial degraded（成功率 ~30-50%）
+//   33min 全程没攒够 5 次连续失败，熔断器始终 closed，每次"先打 xAI 失败再 fallback"
+//   白白叠加延迟。降到 3 后类似场景能更快切到 fallback 减少业务感知。
+const FAIL_THRESHOLD = 3;
 const OPEN_SECONDS = 30;
 /** Auth 错误立即长开熔断，避免继续空耗 Token 并放大告警 */
 export const AUTH_OPEN_SECONDS = 600; // 10 分钟

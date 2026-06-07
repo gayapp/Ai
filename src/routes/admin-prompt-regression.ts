@@ -215,7 +215,19 @@ function expectedMatch(
   sample: PromptRegressionSample,
 ): boolean | null {
   if (!Object.prototype.hasOwnProperty.call(sample, "expected")) return null;
-  return stableJson(normalizeComparable(result)) === stableJson(sample.expected);
+  return expectedSubsetMatch(normalizeComparable(result), sample.expected);
+}
+
+function expectedSubsetMatch(actual: unknown, expected: unknown): boolean {
+  if (expected && typeof expected === "object" && !Array.isArray(expected)) {
+    if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
+    const actualObj = actual as Record<string, unknown>;
+    const expectedObj = expected as Record<string, unknown>;
+    return Object.keys(expectedObj).every((key) =>
+      expectedSubsetMatch(actualObj[key], expectedObj[key])
+    );
+  }
+  return stableJson(actual) === stableJson(expected);
 }
 
 function normalizeComparable(result: Record<string, unknown>): unknown {

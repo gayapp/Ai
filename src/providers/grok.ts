@@ -10,24 +10,27 @@ export function createGrokAdapter(env: Env): ProviderAdapter {
   return {
     id: "grok",
     async moderate(args: ProviderCallArgs): Promise<ProviderResult> {
-      if (args.isImage) {
-        throw new AppError(
-          ErrorCodes.UNSUPPORTED_CONTENT,
-          400,
-          "grok: image moderation not supported in this build",
-        );
-      }
       const apiKey = env.GROK_API_KEY;
       if (!apiKey) {
         throw new AppError(ErrorCodes.PROVIDER_ERROR, 500, "GROK_API_KEY not configured");
       }
-      const model = env.GROK_MODEL || "grok-4-fast-non-reasoning";
+      // 文本 biz_type 走 fast-non-reasoning；avatar/image 走 vision-capable 模型（默认 grok-4）。
+      // GROK_VISION_MODEL 单独配置允许独立调整。
+      const textModel = env.GROK_MODEL || "grok-4-fast-non-reasoning";
+      const visionModel = (env as { GROK_VISION_MODEL?: string }).GROK_VISION_MODEL || "grok-4";
+      const model = args.isImage ? visionModel : textModel;
       const startedAt = Date.now();
+      const userContent: unknown = args.isImage
+        ? [
+            { type: "image_url", image_url: { url: args.content, detail: "high" } },
+            { type: "text", text: "Moderate this image per the rules above." },
+          ]
+        : args.content;
       const body = {
         model,
         messages: [
           { role: "system", content: `${args.systemPrompt}\n\n${STRUCTURE_SUFFIX}` },
-          { role: "user", content: args.content },
+          { role: "user", content: userContent },
         ],
         response_format: { type: "json_object" },
         temperature: 0,

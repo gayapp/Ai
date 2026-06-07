@@ -197,7 +197,7 @@ describe("media_intro route and pipeline", () => {
     });
   });
 
-  it("falls back to Gemini when xAI fails synchronously", async () => {
+  it.skip("falls back to Gemini when xAI fails synchronously (gemini fallback removed 2026-06-04)", async () => {
     const db = new FakeD1();
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fetchMock = vi.fn(async (url: string) => {

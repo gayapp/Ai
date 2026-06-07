@@ -53,7 +53,7 @@ X-Request-Id: <request_id>
 | `risk_level` | enum | `safe \| low \| medium \| high` | 风险等级 |
 | `categories` | string[] | 见下 | 命中的风险类别，可多个；`status=pass` 时为 `[]` |
 | `reason` | string | ≤512 | 人类可读原因 |
-| `provider` | enum | `grok \| gemini` | 实际调用的上游 |
+| `provider` | enum \| null | `grok \| gemini \| null` | 实际调用的上游；`null` 见下方说明 |
 | `model` | string | 如 `grok-2-latest` | 模型标识 |
 | `prompt_version` | integer | | 使用的 prompt 版本号 |
 | `cached` | boolean | | 是否命中去重缓存 |
@@ -62,6 +62,20 @@ X-Request-Id: <request_id>
 | `latency_ms` | integer | | 端到端耗时（含队列等待） |
 | `extra` | object | ≤4KB | 应用提交时的 `extra` 原样回传 |
 | `created_at` | string | ISO-8601 | 审核完成时间（不是请求时间） |
+
+### `provider` 字段语义（NULL 的合法场景）
+
+`provider` 在以下场景为 `null`，**by-design**，不是数据丢失：
+
+1. **prefilter 命中**（moderation）：`prefiltered_by IS NOT NULL` 时，请求直接走规则判定（如 `low_signal` / `ad:qq_number`），未打模型。占 moderation 流量约 3-5%。
+2. **历史 sweep give-up**（analyze）：2026-06-01 之前 [pending-sweep.ts](../src/analyze/pending-sweep.ts) 把 `pending_timeout` 写 `provider=null`。M25 之后改为按 `biz_type` + `provider_strategy` 回填 intended provider；新数据 30d 内 unknown 占比应滑降到 <1%。
+3. **错误路径丢归因**（moderation）：[moderate.ts](../src/routes/moderate.ts) 错误捕获时若 AppError 未带 provider 信息，写库 `provider=null`。该路径占比极小且后续优化中。
+
+Admin UI / 告警 SQL 按 `provider` 聚合时，建议：
+
+- 跨表查询时显式分桶：`COALESCE(provider, 'unknown')`
+- 想剔除 prefilter 干扰：附加 `AND prefiltered_by IS NULL`
+- 想剔除 sweep give-up：附加 `AND error_code != 'pending_timeout'`
 
 ### `status` 取值语义
 

@@ -12,6 +12,7 @@ export const ErrorCodes = {
   PROVIDER_TIMEOUT: "provider_timeout",
   PROVIDER_AUTH_FAILED: "provider_auth_failed",
   SERVICE_UNAVAILABLE: "service_unavailable",
+  BACKLOG_OVERLOAD: "backlog_overload",
   SCHEMA_ERROR: "schema_error",
   SCHEMA_VALIDATION_FAILED: "schema_validation_failed",
   SYNC_TIMEOUT: "sync_timeout",

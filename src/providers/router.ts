@@ -24,11 +24,15 @@ export interface ProviderAdapter {
   moderate(args: ProviderCallArgs): Promise<ProviderResult>;
 }
 
+// 2026-06-04 起平台下线 gemini，全链路只走 xAI（Grok 文本 + Grok-4 vision）。
+//   - 所有 moderation biz_type（含 avatar）primary=grok，fallback=null
+//   - 所有 analyze biz_type primary=xai，fallback=null
+//   - strategy="gemini" / "round_robin" 退化为 xai-only（保留枚举值兼容旧 app 配置）
 const DEFAULT_ROUTE: Record<BizType, { primary: Provider; fallback: Provider | null }> = {
-  comment: { primary: "grok", fallback: "gemini" },
-  nickname: { primary: "grok", fallback: "gemini" },
-  bio: { primary: "grok", fallback: "gemini" },
-  avatar: { primary: "gemini", fallback: null }, // image → Gemini only (Grok text fallback useless)
+  comment: { primary: "grok", fallback: null },
+  nickname: { primary: "grok", fallback: null },
+  bio: { primary: "grok", fallback: null },
+  avatar: { primary: "grok", fallback: null }, // grok-4 vision，需 GROK_VISION_MODEL（默认 grok-4）
 };
 
 export interface AnalyzeRoute {
@@ -37,38 +41,21 @@ export interface AnalyzeRoute {
 }
 
 const DEFAULT_ANALYZE_ROUTE: Record<AnalyzeBizType, AnalyzeRoute> = {
-  media_analysis: { primary: "gemini", fallback: "xai" },
-  media_intro: { primary: "xai", fallback: "gemini" },
+  media_analysis: { primary: "xai", fallback: null },
+  media_intro: { primary: "xai", fallback: null },
 };
 
 /**
  * Resolve the primary/fallback providers for a request.
- *  - avatar 永远用 gemini（Grok 无 Vision，strategy 无视）
- *  - 文本类根据 app.provider_strategy 决定：
- *      auto         → 平台默认（grok 主、gemini 备）
- *      grok         → grok 主、gemini 备
- *      gemini       → gemini 主、grok 备
- *      round_robin  → 基于 Date.now() 奇偶切换主；另一家当备
+ *   平台 2026-06-04 起统一 xai-only，strategy 字段保留但所有取值都解析为 grok-only（无 fallback）。
+ *   保留 "auto" / "grok" / "gemini" / "round_robin" 枚举仅为不破坏现有 app 配置 schema。
  */
 export function resolveRoute(
   biz: BizType,
   strategy: ProviderStrategy,
 ): { primary: Provider; fallback: Provider | null } {
-  if (biz === "avatar") return DEFAULT_ROUTE.avatar;
-  switch (strategy) {
-    case "grok":
-      return { primary: "grok", fallback: "gemini" };
-    case "gemini":
-      return { primary: "gemini", fallback: "grok" };
-    case "round_robin": {
-      const primary: Provider = (Math.floor(Date.now() / 1000) % 2 === 0) ? "grok" : "gemini";
-      const fallback: Provider = primary === "grok" ? "gemini" : "grok";
-      return { primary, fallback };
-    }
-    case "auto":
-    default:
-      return DEFAULT_ROUTE[biz];
-  }
+  void strategy; // 所有策略统一映射为 grok-only
+  return DEFAULT_ROUTE[biz];
 }
 
 /** @deprecated 用 resolveRoute(biz, strategy) 替代 */
@@ -80,29 +67,8 @@ export function resolveAnalyzeRoute(
   biz: AnalyzeBizType,
   strategy: ProviderStrategy = "auto",
 ): AnalyzeRoute {
-  const route = DEFAULT_ANALYZE_ROUTE[biz];
-  switch (strategy) {
-    case "gemini":
-      return {
-        primary: "gemini",
-        fallback: route.primary === "gemini" ? route.fallback : route.primary,
-      };
-    case "grok":
-      return {
-        primary: "xai",
-        fallback: null,
-      };
-    case "round_robin": {
-      const primary: AnalyzeProvider = (Math.floor(Date.now() / 1000) % 2 === 0)
-        ? "xai"
-        : "gemini";
-      const fallback: AnalyzeProvider = primary === "xai" ? "gemini" : "xai";
-      return { primary, fallback };
-    }
-    case "auto":
-    default:
-      return route;
-  }
+  void strategy; // 2026-06-04 起 analyze 统一 xai-only
+  return DEFAULT_ANALYZE_ROUTE[biz];
 }
 
 export function getAdapter(env: Env, provider: Provider): ProviderAdapter {
