@@ -21,8 +21,37 @@ export const BACKPRESSURE_WARN_PCT = 0.6;
 export const RETRY_AFTER_SECONDS = 30;
 /** cron 写、入口 read 的 KV key */
 export const PENDING_COUNT_KV_KEY = "kv:analyze:pending:count";
+/** admin-only one-shot gate prefix for controlled IRC live 503 acceptance. */
+export const BACKPRESSURE_CANARY_KV_PREFIX = "kv:analyze:backpressure-canary:";
+export const BACKPRESSURE_CANARY_DEFAULT_TTL_SECONDS = 120;
+export const BACKPRESSURE_CANARY_MAX_TTL_SECONDS = 300;
 
 export type BacklogSeverity = "ok" | "warn" | "crit";
+
+export interface BackpressureCanaryGate {
+  app_id: string;
+  biz_type: string;
+  biz_id: string;
+  reason: string | null;
+  armed_by: string;
+  armed_at_ms: number;
+  expires_at_ms: number;
+}
+
+export interface ArmBackpressureCanaryInput {
+  appId: string;
+  bizType: string;
+  bizId: string;
+  ttlSeconds?: number;
+  reason?: string | null;
+  armedBy?: string | null;
+}
+
+export interface BackpressureMatchInput {
+  appId: string;
+  bizType: string;
+  bizId: string;
+}
 
 /**
  * 读 NONCE KV 缓存里的 pending 池规模。
@@ -38,6 +67,67 @@ export async function getPendingCountCached(env: Env): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+export function backpressureCanaryKey(appId: string): string {
+  return `${BACKPRESSURE_CANARY_KV_PREFIX}${appId}`;
+}
+
+export async function armBackpressureCanary(
+  env: Env,
+  input: ArmBackpressureCanaryInput,
+): Promise<BackpressureCanaryGate> {
+  const now = Date.now();
+  const ttlSeconds = clampCanaryTtl(input.ttlSeconds);
+  const gate: BackpressureCanaryGate = {
+    app_id: input.appId,
+    biz_type: input.bizType,
+    biz_id: input.bizId,
+    reason: input.reason?.trim() || null,
+    armed_by: input.armedBy?.trim() || "admin",
+    armed_at_ms: now,
+    expires_at_ms: now + ttlSeconds * 1000,
+  };
+  await env.NONCE.put(backpressureCanaryKey(input.appId), JSON.stringify(gate), {
+    expirationTtl: ttlSeconds,
+  });
+  return gate;
+}
+
+export async function getBackpressureCanary(
+  env: Env,
+  appId: string,
+): Promise<BackpressureCanaryGate | null> {
+  const key = backpressureCanaryKey(appId);
+  const raw = await env.NONCE.get(key);
+  if (!raw) return null;
+  const gate = parseBackpressureCanary(raw);
+  if (!gate || gate.expires_at_ms <= Date.now()) {
+    await env.NONCE.delete(key);
+    return null;
+  }
+  return gate;
+}
+
+export async function clearBackpressureCanary(env: Env, appId: string): Promise<void> {
+  await env.NONCE.delete(backpressureCanaryKey(appId));
+}
+
+async function consumeMatchingBackpressureCanary(
+  env: Env,
+  input: BackpressureMatchInput,
+): Promise<BackpressureCanaryGate | null> {
+  const gate = await getBackpressureCanary(env, input.appId);
+  if (!gate) return null;
+  if (
+    gate.app_id !== input.appId ||
+    gate.biz_type !== input.bizType ||
+    gate.biz_id !== input.bizId
+  ) {
+    return null;
+  }
+  await clearBackpressureCanary(env, input.appId);
+  return gate;
 }
 
 /**
@@ -65,12 +155,24 @@ export function getBacklogSeverity(
 export async function enforceBackpressure(
   c: Context<{ Bindings: Env }>,
   hardLimit: number = BACKPRESSURE_HARD_LIMIT,
+  matchInput?: BackpressureMatchInput,
 ): Promise<Response | null> {
   const count = await getPendingCountCached(c.env);
-  const severity = getBacklogSeverity(count, hardLimit);
+  let currentBacklog = count;
+  let severity = getBacklogSeverity(count, hardLimit);
+  let canaryGate: BackpressureCanaryGate | null = null;
 
-  c.header("X-Analyze-Backlog", String(count));
+  if (severity !== "crit" && matchInput) {
+    canaryGate = await consumeMatchingBackpressureCanary(c.env, matchInput);
+    if (canaryGate) {
+      currentBacklog = Math.max(count, hardLimit + 1);
+      severity = "crit";
+    }
+  }
+
+  c.header("X-Analyze-Backlog", String(currentBacklog));
   c.header("X-Analyze-Backlog-Severity", severity);
+  if (canaryGate) c.header("X-Analyze-Backpressure-Canary", "1");
 
   if (severity === "crit") {
     return c.json(
@@ -78,11 +180,47 @@ export async function enforceBackpressure(
         error_code: "backlog_overload",
         message: "analyze backlog exceeded; retry after the indicated seconds",
         retry_after_seconds: RETRY_AFTER_SECONDS,
-        current_backlog: count,
+        current_backlog: currentBacklog,
         hard_limit: hardLimit,
+        ...(canaryGate ? { canary: true } : {}),
       },
       503,
     );
   }
   return null;
+}
+
+function clampCanaryTtl(ttlSeconds: number | undefined): number {
+  if (!ttlSeconds) return BACKPRESSURE_CANARY_DEFAULT_TTL_SECONDS;
+  return Math.min(
+    BACKPRESSURE_CANARY_MAX_TTL_SECONDS,
+    Math.max(1, Math.floor(ttlSeconds)),
+  );
+}
+
+function parseBackpressureCanary(raw: string): BackpressureCanaryGate | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<BackpressureCanaryGate>;
+    if (
+      typeof parsed.app_id !== "string" ||
+      typeof parsed.biz_type !== "string" ||
+      typeof parsed.biz_id !== "string" ||
+      typeof parsed.armed_by !== "string" ||
+      typeof parsed.armed_at_ms !== "number" ||
+      typeof parsed.expires_at_ms !== "number"
+    ) {
+      return null;
+    }
+    return {
+      app_id: parsed.app_id,
+      biz_type: parsed.biz_type,
+      biz_id: parsed.biz_id,
+      reason: typeof parsed.reason === "string" ? parsed.reason : null,
+      armed_by: parsed.armed_by,
+      armed_at_ms: parsed.armed_at_ms,
+      expires_at_ms: parsed.expires_at_ms,
+    };
+  } catch {
+    return null;
+  }
 }

@@ -42,7 +42,11 @@ analyzeRouter.post("/v1/analyze", async (c) => {
 
   // M3: pending pool 背压 — 鉴权/限流/参数校验通过后、写 D1 之前拦截。
   //   设 X-Analyze-Backlog* header（每个响应都带）；池超 hard_limit 时返 503 让 IRC 退回持久队列。
-  const backpressureReject = await enforceBackpressure(c);
+  const backpressureReject = await enforceBackpressure(c, undefined, {
+    appId: app.id,
+    bizType: parsed.biz_type,
+    bizId: parsed.biz_id,
+  });
   if (backpressureReject) return backpressureReject;
 
   const mediaIntroInput = parseMediaIntroInputIfNeeded(parsed);

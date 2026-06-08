@@ -442,6 +442,31 @@ Query：`biz_type`、`provider`、`limit`。
 
 ---
 
+### `POST /admin/analyze-backpressure-canary`
+
+Arm an admin-only, one-shot overload gate for IRC controlled acceptance. It does not change `hard_limit`.
+
+Body:
+
+```json
+{
+  "app_id": "app_irc",
+  "biz_type": "media_analysis",
+  "biz_id": "video-canary-1",
+  "ttl_seconds": 120,
+  "reason": "IRC controlled backlog acceptance"
+}
+```
+
+The next authenticated `/v1/analyze` request with the exact same `app_id + biz_type + biz_id` returns the normal M3 `503 backlog_overload` contract before any D1 insert or queue send, then the gate is consumed. `ttl_seconds` is capped at 300.
+
+Related endpoints:
+
+- `GET /admin/analyze-backpressure-canary?app_id=<app_id>` checks the active gate.
+- `DELETE /admin/analyze-backpressure-canary/{app_id}` clears it.
+
+---
+
 ## Providers（模型与熔断状态）
 
 ### `GET /admin/providers/status`
