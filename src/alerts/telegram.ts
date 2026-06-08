@@ -2,7 +2,7 @@
  *  仅当 TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID 两个 secret 都配置了才生效。
  *  未配置时所有告警调用都是 no-op（返回 false），不报错。
  */
-import { PENDING_COUNT_KV_KEY } from "../analyze/backpressure.ts";
+import { BACKPRESSURE_HARD_LIMIT, PENDING_COUNT_KV_KEY } from "../analyze/backpressure.ts";
 
 export interface AlertContext {
   title: string;
@@ -108,7 +108,7 @@ export interface AlertThresholds {
   analyzeSawToothWindowMs: number;        // M14：滑动窗（默认 3h）
   analyzeSawToothSlowThresholdMs: number; // 完成耗时超此值算"慢请求"（默认 5min）
   analyzeSawToothMinCount: number;        // 慢请求数 ≥ 该值告警（默认 50）
-  analyzePendingPoolHardLimit: number;    // M3：与 backpressure.ts 同源（canary=2000，final=500）
+  analyzePendingPoolHardLimit: number;    // M3：与 backpressure.ts 同源（final=500）
   analyzePendingPoolWarnPct: number;      // count > hardLimit*该比例 → warn 告警
 }
 
@@ -138,7 +138,7 @@ export const DEFAULT_THRESHOLDS: AlertThresholds = {
   analyzeSawToothWindowMs: 3 * 60 * 60 * 1000,
   analyzeSawToothSlowThresholdMs: 5 * 60 * 1000,
   analyzeSawToothMinCount: 50,
-  analyzePendingPoolHardLimit: 2000,
+  analyzePendingPoolHardLimit: BACKPRESSURE_HARD_LIMIT,
   analyzePendingPoolWarnPct: 0.6,
 };
 

@@ -7,14 +7,14 @@
  * pending count 不在每个请求查 D1（70k 行表 SELECT COUNT(*) ~50ms 拉延迟），
  * 而是 cron 每 5 分钟（star/5 ...）写 NONCE KV（TTL 5min），入口 read。容忍 5min 偏差。
  *
- * Phase 1（canary）：hard_limit=2000，稳态 < 50 不会触发；等 IRC requeue 路径上 prod
- * 后 lower 到 final 500。详见 ai2ai.md。
+ * Phase 2：IRC requeue 路径已通过 controlled prod 503 acceptance，hard_limit 降到 final 500。
+ * 详见 ai2ai.md。
  */
 
 import type { Context } from "hono";
 
-/** Phase 1 canary 阈值。Phase 2 IRC requeue ready 后改为 500。 */
-export const BACKPRESSURE_HARD_LIMIT = 2000;
+/** Final M3 pending-pool hard limit after IRC requeue readiness. */
+export const BACKPRESSURE_HARD_LIMIT = 500;
 /** ≥ 60% 满载报 severity=warn 给 IRC（供其 Phase 2 主动降速参考） */
 export const BACKPRESSURE_WARN_PCT = 0.6;
 /** 503 响应里告诉 IRC 多久后重试（秒）。IRC 退回持久队列 + jitter 重投 */
