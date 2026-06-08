@@ -26,6 +26,22 @@ class FakeKV {
   }
 }
 
+class FakeD1 {
+  constructor(private readonly pendingCount: number) {}
+
+  prepare(_sql: string): FakeStmt {
+    return new FakeStmt(this.pendingCount);
+  }
+}
+
+class FakeStmt {
+  constructor(private readonly pendingCount: number) {}
+
+  async first<T>(): Promise<T> {
+    return { n: this.pendingCount } as T;
+  }
+}
+
 interface FakeContext {
   env: Env;
   setHeaders: Map<string, string>;
@@ -76,6 +92,14 @@ describe("backpressure · getPendingCountCached", () => {
     expect(await getPendingCountCached(env)).toBe(0);
   });
 
+  it("falls back to D1 and backfills KV on cache miss", async () => {
+    const kv = new FakeKV();
+    const env = { NONCE: kv, DB: new FakeD1(42) } as unknown as Env;
+
+    expect(await getPendingCountCached(env)).toBe(42);
+    expect(kv.store.get(PENDING_COUNT_KV_KEY)).toBe("42");
+  });
+
   it("parses integer from KV", async () => {
     const kv = new FakeKV();
     await kv.put(PENDING_COUNT_KV_KEY, "150");
@@ -88,6 +112,15 @@ describe("backpressure · getPendingCountCached", () => {
     await kv.put(PENDING_COUNT_KV_KEY, "not-a-number");
     const env = { NONCE: kv } as unknown as Env;
     expect(await getPendingCountCached(env)).toBe(0);
+  });
+
+  it("refreshes malformed KV value from D1 when available", async () => {
+    const kv = new FakeKV();
+    await kv.put(PENDING_COUNT_KV_KEY, "not-a-number");
+    const env = { NONCE: kv, DB: new FakeD1(17) } as unknown as Env;
+
+    expect(await getPendingCountCached(env)).toBe(17);
+    expect(kv.store.get(PENDING_COUNT_KV_KEY)).toBe("17");
   });
 });
 

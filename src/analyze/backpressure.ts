@@ -5,7 +5,8 @@
  * 慢重投（见 docs/optimization/m3-rfc-pending-pool-backpressure.md）。
  *
  * pending count 不在每个请求查 D1（70k 行表 SELECT COUNT(*) ~50ms 拉延迟），
- * 而是 cron 每 5 分钟（star/5 ...）写 NONCE KV（TTL 5min），入口 read。容忍 5min 偏差。
+ * 而是 cron 每 5 分钟（star/5 ...）写 NONCE KV。入口优先 read KV；若 KV miss/坏值，
+ * 仅当次 fallback 查一次 D1 并回填，避免 cron 抖动时背压失效。
  *
  * Phase 2：IRC requeue 路径已通过 controlled prod 503 acceptance，hard_limit 降到 final 500。
  * 详见 ai2ai.md。
@@ -21,6 +22,8 @@ export const BACKPRESSURE_WARN_PCT = 0.6;
 export const RETRY_AFTER_SECONDS = 30;
 /** cron 写、入口 read 的 KV key */
 export const PENDING_COUNT_KV_KEY = "kv:analyze:pending:count";
+/** Slightly longer than the 5min cron cadence so schedule jitter does not create KV gaps. */
+export const PENDING_COUNT_KV_TTL_SECONDS = 600;
 /** admin-only one-shot gate prefix for controlled IRC live 503 acceptance. */
 export const BACKPRESSURE_CANARY_KV_PREFIX = "kv:analyze:backpressure-canary:";
 export const BACKPRESSURE_CANARY_DEFAULT_TTL_SECONDS = 120;
@@ -55,15 +58,33 @@ export interface BackpressureMatchInput {
 
 /**
  * 读 NONCE KV 缓存里的 pending 池规模。
- * - 缺失（cron 还没写过）或解析失败 → 返 0（保守视为健康，不拒）
- * - 这是防御：KV 故障不应直接阻断业务，最坏退化成"不背压"
+ * - KV 命中且合法 → 直接返回
+ * - KV 缺失/坏值/读取失败 → 查一次 D1 并回填 KV
+ * - D1 或 KV 都不可用 → 返 0（保守视为健康，不拒）
  */
 export async function getPendingCountCached(env: Env): Promise<number> {
   try {
     const raw = await env.NONCE.get(PENDING_COUNT_KV_KEY);
-    if (!raw) return 0;
-    const n = parseInt(raw, 10);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
+    if (raw) {
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+  } catch {
+    // Fall through to D1 refresh. If D1 or KV is also unavailable, refresh returns 0.
+  }
+  return refreshPendingCountCache(env);
+}
+
+export async function refreshPendingCountCache(env: Env): Promise<number> {
+  try {
+    const row = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM analyze_requests WHERE status = 'pending'`,
+    ).first<{ n: number }>();
+    const n = Math.max(0, Number(row?.n ?? 0) || 0);
+    await env.NONCE.put(PENDING_COUNT_KV_KEY, String(n), {
+      expirationTtl: PENDING_COUNT_KV_TTL_SECONDS,
+    });
+    return n;
   } catch {
     return 0;
   }

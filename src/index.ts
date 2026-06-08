@@ -35,7 +35,7 @@ import { processCallback, sweepAnalyzeCallbackDeliveries } from "./callback/disp
 import { saveAvatarEvidence } from "./evidence/r2.ts";
 import { sweepModerationPending } from "./moderation/pending-sweep.ts";
 import { rollupYesterday } from "./stats/rollup.ts";
-import { PENDING_COUNT_KV_KEY } from "./analyze/backpressure.ts";
+import { PENDING_COUNT_KV_KEY, PENDING_COUNT_KV_TTL_SECONDS } from "./analyze/backpressure.ts";
 import { sweepAnalyzePending } from "./analyze/pending-sweep.ts";
 import { dispatchAnalyzeJob } from "./analyze/pipeline/dispatcher.ts";
 import type { AnalyzeJob } from "./analyze/types.ts";
@@ -345,13 +345,15 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
     }
 
     // M3: pending pool count → NONCE KV，入口背压用。
-    //   每 5min 刷一次，避免每请求 SELECT COUNT(*) 拉延迟。expirationTtl 300s 与 cron 节奏对齐。
+    //   每 5min 刷一次，避免每请求 SELECT COUNT(*) 拉延迟。TTL 稍长于 cron 节奏，容忍调度抖动。
     try {
       const row = await env.DB.prepare(
         `SELECT COUNT(*) AS n FROM analyze_requests WHERE status = 'pending'`,
       ).first<{ n: number }>();
       const n = row?.n ?? 0;
-      await env.NONCE.put(PENDING_COUNT_KV_KEY, String(n), { expirationTtl: 300 });
+      await env.NONCE.put(PENDING_COUNT_KV_KEY, String(n), {
+        expirationTtl: PENDING_COUNT_KV_TTL_SECONDS,
+      });
       console.log(`[scheduled] analyze pending count = ${n}`);
     } catch (e) {
       console.warn("[scheduled] analyze pending count write failed", e);
