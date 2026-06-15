@@ -67,7 +67,9 @@ X-Signature    = hex(hmac_sha256(secret, string_to_sign))
 
 约束补充：
 - `image_urls` 仅 `post` 可用；非图/不可达 URL → 该请求 `status=error`（按约定重试或转人工）。
-- `mode=sync` 时一直等待结论；多图较慢，建议同趣给 ≥15s 的客户端超时，或用 `mode=auto` 让平台超时自动降级。
+- **图文/视频帖请用 `mode=auto`**（强烈建议）：服务端同步调用上限 10s，而多图视觉模型（grok-4）通常 >10s，`mode=sync` 多图会大概率返回 `504 provider_timeout`。`mode=auto` 会在同步超时后自动降级为异步并走回调，**必须带 `callback_url`**（或 app 已配默认回调）。
+- **纯文字帖**可用 `mode=sync` 直接拿结论（文本模型快，<10s）。
+- 线上实测：2 张图 `mode=auto` 约 12~20s 出结论（异步回调）。
 
 ### 3.2 示例
 
