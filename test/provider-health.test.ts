@@ -55,90 +55,102 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("checkProviderHealth · M11 team_blocked", () => {
-  it("emits 🚨🚨 crit alert with console.x.ai when xAI returns team_blocked=true", async () => {
-    const { sent, handler } = captureTelegram();
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "https://api.x.ai/v1/api-key") {
-        return new Response(
-          JSON.stringify({ team_blocked: true, api_key_blocked: false, api_key_disabled: false }),
-          { status: 200 },
-        );
-      }
-      if (url.includes("generativelanguage.googleapis.com")) {
-        // gemini health probe: return a valid moderation JSON
-        return new Response(
-          JSON.stringify({
-            candidates: [{ content: { parts: [{ text: JSON.stringify({ status: "pass", risk_level: "safe", categories: [], reason: "ok" }) }] } }],
-            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-          }),
-          { status: 200 },
-        );
+describe("checkProviderHealth · /v1/models probe", () => {
+  it("grok ok when the inference key lists models (http 200)", async () => {
+    const { handler } = captureTelegram();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "https://api.x.ai/v1/models") {
+        return new Response(JSON.stringify({ data: [{ id: "grok-4-fast-non-reasoning" }] }), { status: 200 });
       }
       return handler(url, init);
-    }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
-    const env = makeEnv();
-    const r = await checkProviderHealth(env);
+    const r = await checkProviderHealth(makeEnv());
 
-    expect(r.grok.ok).toBe(false);
-    expect(r.grok.reason).toBe("team_blocked");
-    expect(r.fired).toContain("grok:team_blocked");
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.text).toContain("🚨🚨");
-    expect(sent[0]!.text).toContain("console.x.ai");
-    expect(sent[0]!.text).toContain("组织级屏蔽");
+    expect(r.grok.ok).toBe(true);
+    expect(r.fired).toHaveLength(0);
+    // only the xAI probe — gemini is sunset, telegram only on failure
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("uses separate dedup key per reason — team_blocked alert won't dedup an unauthorized alert", async () => {
+  it("emits 🚨 crit unauthorized alert when /v1/models returns 401", async () => {
     const { sent, handler } = captureTelegram();
-    let xaiResponder: () => Response = () =>
-      new Response(JSON.stringify({ team_blocked: true, api_key_blocked: false, api_key_disabled: false }), { status: 200 });
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "https://api.x.ai/v1/api-key") return xaiResponder();
-      if (url.includes("generativelanguage.googleapis.com")) {
+      if (url === "https://api.x.ai/v1/models") return new Response("nope", { status: 401 });
+      return handler(url, init);
+    }));
+
+    const r = await checkProviderHealth(makeEnv());
+
+    expect(r.grok.ok).toBe(false);
+    expect(r.grok.reason).toBe("unauthorized");
+    expect(r.fired).toContain("grok:unauthorized");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain("🚨");
+    expect(sent[0]!.text).toContain("401");
+  });
+
+  it("treats xAI 400 'Incorrect API key' as unauthorized (not http_error)", async () => {
+    const { sent, handler } = captureTelegram();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "https://api.x.ai/v1/models") {
         return new Response(
-          JSON.stringify({
-            candidates: [{ content: { parts: [{ text: JSON.stringify({ status: "pass", risk_level: "safe", categories: [], reason: "ok" }) }] } }],
-            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-          }),
-          { status: 200 },
+          JSON.stringify({ code: "invalid-argument", error: "Incorrect API key provided: xa***jU." }),
+          { status: 400 },
         );
       }
       return handler(url, init);
     }));
 
+    const r = await checkProviderHealth(makeEnv());
+
+    expect(r.grok.ok).toBe(false);
+    expect(r.grok.reason).toBe("unauthorized");
+    expect(r.fired).toContain("grok:unauthorized");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain("🚨");
+  });
+
+  it("ALERTS_DISABLED=true silences the alert even when grok is unhealthy", async () => {
+    const { sent, handler } = captureTelegram();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "https://api.x.ai/v1/models") return new Response("nope", { status: 401 });
+      return handler(url, init);
+    }));
+
+    const r = await checkProviderHealth(makeEnv({ ALERTS_DISABLED: "true" } as Partial<Env>));
+
+    expect(r.grok.ok).toBe(false); // health still computed
+    expect(r.grok.reason).toBe("unauthorized");
+    expect(r.fired).toHaveLength(0); // but nothing fired
+    expect(sent).toHaveLength(0);
+  });
+
+  it("uses separate dedup key per reason — http_error won't dedup an unauthorized alert", async () => {
+    const { sent, handler } = captureTelegram();
+    let xaiResponder: () => Response = () => new Response("bad", { status: 400 });
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "https://api.x.ai/v1/models") return xaiResponder();
+      return handler(url, init);
+    }));
+
     const env = makeEnv();
-    await checkProviderHealth(env);
+    await checkProviderHealth(env); // http_error (400)
     xaiResponder = () => new Response("nope", { status: 401 });
-    await checkProviderHealth(env);
+    await checkProviderHealth(env); // unauthorized (401)
 
     expect(sent).toHaveLength(2);
-    // Telegram Markdown escape turns _ into \_, so compare against escaped form
-    expect(sent[0]!.text).toContain("team\\_blocked");
+    expect(sent[0]!.text).toContain("400");
     expect(sent[1]!.text).toContain("401");
   });
 });
 
 describe("checkProviderHealth · M12 24h recurrence escalation", () => {
-  it("second team_blocked alert within 24h is marked 复发", async () => {
+  it("second unauthorized alert within 24h is marked 复发", async () => {
     const { sent, handler } = captureTelegram();
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "https://api.x.ai/v1/api-key") {
-        return new Response(
-          JSON.stringify({ team_blocked: true, api_key_blocked: false, api_key_disabled: false }),
-          { status: 200 },
-        );
-      }
-      if (url.includes("generativelanguage.googleapis.com")) {
-        return new Response(
-          JSON.stringify({
-            candidates: [{ content: { parts: [{ text: JSON.stringify({ status: "pass", risk_level: "safe", categories: [], reason: "ok" }) }] } }],
-            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-          }),
-          { status: 200 },
-        );
-      }
+      if (url === "https://api.x.ai/v1/models") return new Response("nope", { status: 401 });
       return handler(url, init);
     }));
 

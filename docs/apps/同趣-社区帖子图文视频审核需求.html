@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Document</title>
+<style>
+:root{--bg:#fff;--soft:#f8fafc;--border:#e2e8f0;--text:#0f172a;--muted:#475569;--primary:#2563eb;--danger:#dc2626}
+*{box-sizing:border-box}body{margin:0;font:15px/1.75 "Segoe UI","Microsoft YaHei",sans-serif;color:var(--text);background:var(--bg)}
+aside{position:fixed;inset:0 auto 0 0;width:280px;overflow:auto;padding:24px 18px;background:var(--soft);border-right:1px solid var(--border)}
+aside h2{font-size:13px;text-transform:uppercase;color:var(--muted);letter-spacing:.08em}aside a{display:block;padding:5px 8px;border-radius:6px;color:var(--text);text-decoration:none}
+aside a:hover{background:var(--primary);color:white}.toc-l3{padding-left:22px;font-size:13px;color:var(--muted)}
+main{margin-left:280px;max-width:1080px;padding:44px 64px}header{border-bottom:3px solid var(--primary);padding-bottom:20px;margin-bottom:34px}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:42px;border-bottom:1px solid var(--border);padding-bottom:8px;color:#1e40af}h3{margin-top:28px}
+.meta{display:flex;flex-wrap:wrap;gap:12px 22px;color:var(--muted);font-size:13px}
+code{background:#eef2ff;color:#3730a3;padding:2px 5px;border-radius:4px}pre{background:#0f172a;color:#e2e8f0;padding:16px 18px;border-radius:8px;overflow:auto}
+pre code{background:transparent;color:inherit;padding:0}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid var(--border);padding:9px 11px;text-align:left;vertical-align:top}th{background:var(--soft)}
+blockquote{border-left:4px solid var(--primary);background:#eff6ff;margin:16px 0;padding:10px 16px}.danger{color:var(--danger);font-weight:700}
+@media(max-width:900px){aside{position:static;width:auto}main{margin-left:0;padding:24px}}
+</style>
+</head>
+<body>
+<aside><h2>目录</h2><a class="toc-l1" href="#同趣-社区帖子-图文-视频-审核-ai-guard-端需求">同趣 · 社区帖子（图文 / 视频）审核 — ai-guard 端需求</a>
+<a class="toc-l2" href="#1-背景与诉求">1. 背景与诉求</a>
+<a class="toc-l2" href="#2-需求清单-ai-guard-端要做的">2. 需求清单（ai-guard 端要做的）</a>
+<a class="toc-l3" href="#2-1-新增-biztype-post">2.1 新增 `biz_type = 'post'`</a>
+<a class="toc-l3" href="#2-2-新增多图入参-imageurls-string">2.2 新增多图入参 `image_urls: string[]`</a>
+<a class="toc-l3" href="#2-3-视频帧审核-复用多图能力">2.3 视频帧审核（复用多图能力）</a>
+<a class="toc-l3" href="#2-4-视觉模型策略">2.4 视觉模型策略</a>
+<a class="toc-l3" href="#2-5-同步-异步-回调">2.5 同步 + 异步 + 回调</a>
+<a class="toc-l2" href="#3-接口契约-期望">3. 接口契约（期望）</a>
+<a class="toc-l3" href="#3-1-请求-post-v1-moderate">3.1 请求 `POST /v1/moderate`</a>
+<a class="toc-l3" href="#3-2-同步响应-期望-沿用现有结构">3.2 同步响应（期望，沿用现有结构）</a>
+<a class="toc-l3" href="#3-3-回调-异步时-沿用现有-schema-仅-biztype-多一枚举">3.3 回调（异步时，沿用现有 schema，仅 biz_type 多一枚举）</a>
+<a class="toc-l2" href="#4-调用方信息">4. 调用方信息</a>
+<a class="toc-l2" href="#5-验收-联调">5. 验收（联调）</a>
+<a class="toc-l2" href="#6-兼容性-备注">6. 兼容性 &amp; 备注</a></aside>
+<main>
+<header><h1>Document</h1><div class="meta"></div></header>
+<h1 id="同趣-社区帖子-图文-视频-审核-ai-guard-端需求">同趣 · 社区帖子（图文 / 视频）审核 — ai-guard 端需求</h1>
+<blockquote>提出方：同趣（duan_v2）</blockquote>
+<blockquote>日期：2026-06-15</blockquote>
+<blockquote>对接 App：同趣 <code>app_79e81a7183747039</code></blockquote>
+<blockquote>这是历史 M-201 的正式化需求（之前一直未排期）。</blockquote>
+<blockquote>配套（同趣侧设计，供参考）：duan_v2 <code>docs/specs/SPEC-20260615-001-community-post-moderation-and-slicing.md</code></blockquote>
+<p>---</p>
+<h2 id="1-背景与诉求">1. 背景与诉求</h2>
+<p>同趣社区现要对<strong>用户发帖</strong>做审核，分两类：</p>
+<ul>
+<li><strong>图片帖</strong>：1~N 张图片 + 标题/正文。</li>
+<li><strong>视频帖</strong>：同趣 VPS（moderation-service）会先对视频<strong>间隔抽帧</strong>得到 N 张帧图，再当作&quot;多图&quot;送审。</li>
+</ul>
+<p>当前 ai-guard 对同趣只启用了 <code>comment / nickname / bio / avatar</code>，其中 <strong>avatar 是单张图片 URL</strong>。社区帖需要 <strong><code>biz_type='post'</code> + 多图 <code>image_urls</code> 数组</strong>，这是现有契约没有的，需要 ai-guard 端开发。</p>
+<blockquote>成本背景：同趣侧已在 VPS 把图片<strong>压缩成小图（WebP，w≤768）</strong>后再送审，URL 指向 B2 公网图。ai-guard 只需按 URL 拉图分析。</blockquote>
+<p>---</p>
+<h2 id="2-需求清单-ai-guard-端要做的">2. 需求清单（ai-guard 端要做的）</h2>
+<h3 id="2-1-新增-biztype-post">2.1 新增 <code>biz_type = 'post'</code></h3>
+<ul>
+<li>为同趣 App <code>app_79e81a7183747039</code> 启用 <code>post</code>。</li>
+<li><code>/v1/moderate</code> 接受 <code>biz_type='post'</code>。</li>
+<li>回调 schema 的 <code>biz_type</code> 枚举增加 <code>post</code>（<a href="../04-callback-spec.md">04-callback-spec.md</a> §字段定义，向后兼容新增枚举值）。</li>
+</ul>
+<h3 id="2-2-新增多图入参-imageurls-string">2.2 新增多图入参 <code>image_urls: string[]</code></h3>
+<ul>
+<li><code>/v1/moderate</code> 请求体支持 <code>image_urls</code>（字符串数组，每个 <code>https://</code> 公网图 URL）。</li>
+<li>仅 <code>biz_type='post'</code>（及未来需要的多图类型）使用；avatar 仍可用单 <code>content</code>=URL 不变。</li>
+<li>约束建议：数组长度上限（如 ≤12）、单图 ≤8MB、非图/不可达按 <code>unsupported_content</code> 处理。</li>
+<li><strong>整组出一个 verdict</strong>：对一帖的多张图（或一视频的多帧）综合判定，返回单一 <code>status</code>（命中任一严重违规即 reject）。<code>categories</code> 合并去重。</li>
+</ul>
+<h3 id="2-3-视频帧审核-复用多图能力">2.3 视频帧审核（复用多图能力）</h3>
+<ul>
+<li>视频帖的多帧图就是 <code>image_urls</code>，<strong>无需视频解码能力</strong>，ai-guard 当多图处理即可。</li>
+<li><code>extra</code> 会带 <code>{ &quot;post_type&quot;: &quot;video&quot;, ... }</code> 供平台侧统计/调 prompt（可选用）。</li>
+</ul>
+<h3 id="2-4-视觉模型策略">2.4 视觉模型策略</h3>
+<ul>
+<li>post 图片/帧需视觉模型（同 avatar 走 Gemini；Grok 无视觉）。请确保 <code>post</code> 的 provider 策略落到支持视觉的模型，多图一次性送入。</li>
+<li>若多图导致单次 token 过大，平台可自定义分批/采样策略，但对调用方仍是<strong>一次请求、一个结论</strong>。</li>
+</ul>
+<h3 id="2-5-同步-异步-回调">2.5 同步 + 异步 + 回调</h3>
+<ul>
+<li>支持 <code>mode=sync</code>（同趣默认同步拿结论）与 <code>mode=auto</code>（超时降级异步 + 回调）。</li>
+<li>回调契约沿用现有（<a href="../04-callback-spec.md">04-callback-spec.md</a>）：<code>X-Signature = hex(HMAC-SHA256(secret, raw_body))</code>，<code>biz_id</code> 原样回传（= 同趣 <code>post_id</code>），<code>extra</code> 原样回传。</li>
+</ul>
+<p>---</p>
+<h2 id="3-接口契约-期望">3. 接口契约（期望）</h2>
+<h3 id="3-1-请求-post-v1-moderate">3.1 请求 <code>POST /v1/moderate</code></h3>
+<pre><code class="language-json">{
+  &quot;biz_type&quot;: &quot;post&quot;,
+  &quot;biz_id&quot;: &quot;01HXYZ_post_ulid&quot;,
+  &quot;content&quot;: &quot;帖子标题\n帖子正文&quot;,
+  &quot;image_urls&quot;: [
+    &quot;https://f000.backblazeb2.com/file/duanvideo/temp/2026-06-15/post/01HXYZ/0.webp&quot;,
+    &quot;https://f000.backblazeb2.com/file/duanvideo/temp/2026-06-15/post/01HXYZ/1.webp&quot;
+  ],
+  &quot;user_id&quot;: &quot;u_12345&quot;,
+  &quot;mode&quot;: &quot;sync&quot;,
+  &quot;extra&quot;: { &quot;post_type&quot;: &quot;image&quot;, &quot;media_count&quot;: 2 }
+}</code></pre>
+<h3 id="3-2-同步响应-期望-沿用现有结构">3.2 同步响应（期望，沿用现有结构）</h3>
+<pre><code class="language-json">{
+  &quot;request_id&quot;: &quot;01HXYZ-...&quot;,
+  &quot;cached&quot;: false,
+  &quot;result&quot;: {
+    &quot;status&quot;: &quot;pass | reject | review&quot;,
+    &quot;risk_level&quot;: &quot;safe | low | medium | high&quot;,
+    &quot;categories&quot;: [&quot;porn&quot;, &quot;...&quot;],
+    &quot;reason&quot;: &quot;一句中文说明&quot;
+  }
+}</code></pre>
+<h3 id="3-3-回调-异步时-沿用现有-schema-仅-biztype-多一枚举">3.3 回调（异步时，沿用现有 schema，仅 biz_type 多一枚举）</h3>
+<pre><code class="language-json">{
+  &quot;schema_version&quot;: &quot;1.0&quot;,
+  &quot;request_id&quot;: &quot;01HXYZ-...&quot;,
+  &quot;app_id&quot;: &quot;app_79e81a7183747039&quot;,
+  &quot;biz_type&quot;: &quot;post&quot;,
+  &quot;biz_id&quot;: &quot;01HXYZ_post_ulid&quot;,
+  &quot;user_id&quot;: &quot;u_12345&quot;,
+  &quot;status&quot;: &quot;pass | reject | review | error&quot;,
+  &quot;risk_level&quot;: &quot;safe|low|medium|high|null&quot;,
+  &quot;categories&quot;: [&quot;...&quot;],
+  &quot;reason&quot;: &quot;...&quot;,
+  &quot;extra&quot;: { &quot;post_type&quot;: &quot;image&quot;, &quot;media_count&quot;: 2 },
+  &quot;created_at&quot;: &quot;2026-06-15T08:00:00Z&quot;
+}</code></pre>
+<p>---</p>
+<h2 id="4-调用方信息">4. 调用方信息</h2>
+<ul>
+<li>调用方：同趣 <strong>VPS（moderation-service，物理机）</strong>，Python <code>httpx</code>，HMAC-SHA256 签名（按 <code>同趣-integration.md</code> §3）。</li>
+<li>凭据：复用同趣 App <code>app_79e81a7183747039</code> 的 secret（无需新发 App）。</li>
+<li>量级：社区发帖触发，峰值受同趣 100 QPS 限额约束；存量老帖回填会有短时批量（同趣侧会限速）。</li>
+<li><code>biz_id</code> = 同趣 <code>post_id</code>（ULID 字符串，≤128）。</li>
+</ul>
+<p>---</p>
+<h2 id="5-验收-联调">5. 验收（联调）</h2>
+<ul>
+<li>[ ] 同趣用测试 <code>biz_id</code>（<code>test-post-*</code>）+ 2~3 张图调 <code>/v1/moderate</code>，拿到合并 verdict。</li>
+<li>[ ] 正常图 → pass；含违规图 → reject + categories/reason；边界 → review。</li>
+<li>[ ] 不可达 / 非图 URL → <code>unsupported_content</code>（或在 result 里标注，按平台约定）。</li>
+<li>[ ] 异步 + 回调：<code>biz_type='post'</code> 能正确回调，<code>biz_id</code>/<code>extra</code> 原样回传，签名校验通过。</li>
+<li>[ ] 回调 schema <code>biz_type</code> 枚举含 <code>post</code>，旧消费方忽略未知值不报错。</li>
+</ul>
+<p>---</p>
+<h2 id="6-兼容性-备注">6. 兼容性 &amp; 备注</h2>
+<ul>
+<li>仅<strong>新增</strong> <code>biz_type='post'</code> 与 <code>image_urls</code> 入参，不改动 comment/nickname/bio/avatar 现有行为。</li>
+<li>回调 schema 遵循&quot;只增不删、未知字段忽略&quot;承诺。</li>
+<li>若 ai-guard 倾向用 analyze 通道（<a href="../13-callback-spec-analyze.md">13-callback-spec-analyze.md</a> / <a href="../12-content-service.md">12-content-service.md</a>）承载多图，请回告同趣，以便对齐调用面与回调字段。</li>
+</ul>
+</main>
+</body>
+</html>

@@ -5,6 +5,7 @@ import { enforceRateLimit } from "../auth/rate-limit.ts";
 import {
   ModerateRequestSchema,
   CachedResult,
+  requestIsImage,
   type ExecutionResult,
   type ModerateRequest,
 } from "../moderation/schema.ts";
@@ -49,9 +50,13 @@ moderateRouter.post("/v1/moderate", async (c) => {
     );
   }
 
-  const isImage = parsed.biz_type === "avatar";
+  const isImage = requestIsImage(parsed.biz_type, parsed.image_urls);
   const requestId = uuidv7();
-  const contentHash = await computeContentHash(parsed.biz_type, parsed.content);
+  const contentHash = await computeContentHash(
+    parsed.biz_type,
+    parsed.content,
+    parsed.image_urls,
+  );
   const callbackUrl = parsed.callback_url ?? app.callback_url;
 
   // ==== 前置参数校验（必须在 recordPending 之前，否则失败时留残单）====
@@ -82,6 +87,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
     extra: parsed.extra ?? null,
     callback_url: callbackUrl,
     prefiltered_by: pf.tag,
+    image_urls: parsed.image_urls ?? null,
   });
 
   // 命中漏斗直接返回，不打模型、不查 dedup
@@ -154,8 +160,10 @@ moderateRouter.post("/v1/moderate", async (c) => {
   }
 
   // Decide execution path
+  // avatar 在 auto 下直接异步（单图 vision，历史行为）；post 始终先试 sync，
+  //   超时再走下方 catch 的 mode=auto 降级（满足同趣"默认同步拿结论"）。
   const shouldAsync =
-    parsed.mode === "async" || (parsed.mode === "auto" && isImage);
+    parsed.mode === "async" || (parsed.mode === "auto" && parsed.biz_type === "avatar");
 
   if (shouldAsync) {
     // callbackUrl 已在函数顶部校验过（willRequireCallback）
@@ -166,6 +174,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
       biz_id: parsed.biz_id,
       user_id: parsed.user_id ?? null,
       content: parsed.content,
+      image_urls: parsed.image_urls ?? null,
       callback_url: callbackUrl!,
       extra: parsed.extra ?? null,
       created_at_ms: Date.now(),
@@ -184,6 +193,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
       bizType: parsed.biz_type,
       content: parsed.content,
       isImage,
+      imageUrls: parsed.image_urls,
       timeoutMs,
       strategy: app.provider_strategy,
     });
@@ -197,6 +207,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
         biz_id: parsed.biz_id,
         user_id: parsed.user_id ?? null,
         content: parsed.content,
+        image_urls: parsed.image_urls ?? null,
         callback_url: callbackUrl!,
         extra: parsed.extra ?? null,
         created_at_ms: Date.now(),
@@ -251,6 +262,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
     output_tokens: result.output_tokens,
     latency_ms: result.latency_ms,
     error_code: result.error_code ?? null,
+    labels: result.labels ?? null,
   });
 
   // Cache non-error successes (and only when we had a dedup key derived from
@@ -264,6 +276,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
       provider: result.provider,
       model: result.model,
       prompt_version: result.prompt_version,
+      labels: result.labels,
     });
     const ttl = parseInt(c.env.DEDUP_TTL_SECONDS || "604800", 10);
     await putDedup(c.env.DEDUP_CACHE, kvKey, cacheable, ttl);
@@ -277,6 +290,7 @@ moderateRouter.post("/v1/moderate", async (c) => {
       risk_level: result.risk_level,
       categories: result.categories,
       reason: result.reason,
+      ...(result.labels ? { labels: result.labels } : {}),
     },
   });
 });

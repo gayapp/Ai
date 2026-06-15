@@ -14,6 +14,7 @@ export interface EmailAlert {
 }
 
 export async function sendAlertEmail(env: Env, alert: EmailAlert): Promise<boolean> {
+  if (env.ALERTS_DISABLED === "true") return false; // 与 Telegram 同源静默开关（dev）
   const key = env.RESEND_API_KEY;
   const to = env.ALERT_EMAIL;
   if (!key || !to) return false;

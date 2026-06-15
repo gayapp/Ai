@@ -21,6 +21,8 @@ export async function sendTelegramAlert(
   ctx: AlertContext,
   kv: KVNamespace,
 ): Promise<boolean> {
+  // dev 等无真实流量的环境用 ALERTS_DISABLED="true" 整体静默，避免（如失效的测试 key）反复刷告警。
+  if (env.ALERTS_DISABLED === "true") return false;
   const token = env.TELEGRAM_BOT_TOKEN;
   const chatId = env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return false;

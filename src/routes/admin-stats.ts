@@ -370,6 +370,8 @@ adminStatsRouter.get("/requests/:id", async (c) => {
     risk_level: row.risk_level,
     categories: row.categories ? JSON.parse(row.categories) : [],
     reason: row.reason,
+    image_urls: row.image_urls ? JSON.parse(row.image_urls) : null, // post 多图查看
+    labels: row.labels ? JSON.parse(row.labels) : null, // post 结构化标签
     tokens: { input: row.input_tokens ?? 0, output: row.output_tokens ?? 0 },
     latency_ms: row.latency_ms ?? 0,
     error_code: row.error_code,

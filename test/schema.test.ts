@@ -4,6 +4,7 @@ import {
   CallbackBody,
   ModerateRequestSchema,
   CachedResult,
+  requestIsImage,
 } from "../src/moderation/schema.ts";
 
 describe("schema: ModelOutput", () => {
@@ -62,6 +63,86 @@ describe("schema: ModerateRequestSchema", () => {
         content: "hi",
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("schema: post (multi-image)", () => {
+  it("accepts post with content + image_urls", () => {
+    const r = ModerateRequestSchema.safeParse({
+      biz_type: "post",
+      biz_id: "p1",
+      content: "标题\n正文",
+      image_urls: ["https://b2/0.webp", "https://b2/1.webp"],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts image-only post (empty content)", () => {
+    const r = ModerateRequestSchema.safeParse({
+      biz_type: "post",
+      biz_id: "p1",
+      content: "",
+      image_urls: ["https://b2/0.webp"],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects post with neither content nor image_urls", () => {
+    const r = ModerateRequestSchema.safeParse({
+      biz_type: "post",
+      biz_id: "p1",
+      content: "   ",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects >12 images", () => {
+    const r = ModerateRequestSchema.safeParse({
+      biz_type: "post",
+      biz_id: "p1",
+      content: "t",
+      image_urls: Array.from({ length: 13 }, (_, i) => `https://b2/${i}.webp`),
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects non-https image url", () => {
+    const r = ModerateRequestSchema.safeParse({
+      biz_type: "post",
+      biz_id: "p1",
+      content: "t",
+      image_urls: ["http://b2/0.webp"],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects image_urls on a non-post biz_type", () => {
+    const r = ModerateRequestSchema.safeParse({
+      biz_type: "comment",
+      biz_id: "c1",
+      content: "hi",
+      image_urls: ["https://b2/0.webp"],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("ModelOutput accepts labels array", () => {
+    const r = ModelOutput.safeParse({
+      status: "reject",
+      risk_level: "high",
+      categories: ["ad"],
+      reason: "x",
+      labels: [{ category: "ad", detected: true, confidence: 0.9, evidence: "微信号" }],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("requestIsImage: avatar always, post only with images", () => {
+    expect(requestIsImage("avatar")).toBe(true);
+    expect(requestIsImage("post", ["https://b2/0.webp"])).toBe(true);
+    expect(requestIsImage("post", [])).toBe(false);
+    expect(requestIsImage("post")).toBe(false);
+    expect(requestIsImage("comment")).toBe(false);
   });
 });
 

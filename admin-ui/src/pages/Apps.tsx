@@ -6,7 +6,7 @@ import {
   type ProviderStrategy,
 } from "../lib/api";
 
-const MODERATE_BIZ = ["comment", "nickname", "bio", "avatar"];
+const MODERATE_BIZ = ["comment", "nickname", "bio", "avatar", "post"];
 const ANALYZE_BIZ = ["media_analysis", "media_intro"];
 const DELIVERY: DeliveryMode[] = ["callback", "pull", "both"];
 const STRATEGIES: ProviderStrategy[] = ["auto", "grok", "gemini", "round_robin"];

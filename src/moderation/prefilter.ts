@@ -103,27 +103,31 @@ export function applyPrefilter(biz: BizType, content: string): PrefilterOutcome 
   if (biz === "avatar") return { kind: "skip", result: null, tag: null };
 
   // ---- L1 ----
-  const s = stripContent(content);
-  const lowSigThreshold = biz === "nickname" ? 0 : 2;
-  if (s.wasEffectivelyEmojiOnly || s.significantChars <= lowSigThreshold) {
-    return {
-      kind: "pass_lowsignal",
-      result: {
-        status: "pass",
-        risk_level: "safe",
-        categories: [],
-        reason: s.wasEffectivelyEmojiOnly
-          ? "纯表情，无语义审核价值"
-          : "内容过短/为空，无语义审核价值",
-        provider: null,
-        model: null,
-        prompt_version: null,
-        input_tokens: 0,
-        output_tokens: 0,
-        latency_ms: 0,
-      },
-      tag: "low_signal",
-    };
+  // post 跳过 L1 低信噪 pass：图片/帧才是风险载体，"emoji 标题 + 违规图" 不能因标题短而放行；
+  //   但 L2 广告正则仍对 caption 有效，继续往下跑。
+  if (biz !== "post") {
+    const s = stripContent(content);
+    const lowSigThreshold = biz === "nickname" ? 0 : 2;
+    if (s.wasEffectivelyEmojiOnly || s.significantChars <= lowSigThreshold) {
+      return {
+        kind: "pass_lowsignal",
+        result: {
+          status: "pass",
+          risk_level: "safe",
+          categories: [],
+          reason: s.wasEffectivelyEmojiOnly
+            ? "纯表情，无语义审核价值"
+            : "内容过短/为空，无语义审核价值",
+          provider: null,
+          model: null,
+          prompt_version: null,
+          input_tokens: 0,
+          output_tokens: 0,
+          latency_ms: 0,
+        },
+        tag: "low_signal",
+      };
+    }
   }
 
   // ---- L2 ----

@@ -15,6 +15,7 @@ export interface ExecuteArgs {
   bizType: BizType;
   content: string;
   isImage: boolean;
+  imageUrls?: string[]; // post 多图/视频帧
   timeoutMs: number;
   strategy?: ProviderStrategy; // default 'auto'
 }
@@ -54,7 +55,9 @@ export async function executeModeration(
     try {
       return await tryProvider(env, args, route.fallback, false);
     } catch (fbErr) {
-      // 两家都挂 — 如果都是 auth 失败，包装为 SERVICE_UNAVAILABLE 503
+      // 两家都挂 — 如果都是 auth 失败，包装为 SERVICE_UNAVAILABLE 503。
+      // 2026-06-04 后 gemini 全平台下线，所有 route.fallback === null，此分支实际不可达；
+      // 保留 dormant 结构以便未来引入新 fallback provider 时复用。
       if (
         err.code === ErrorCodes.PROVIDER_AUTH_FAILED &&
         fbErr instanceof AppError &&
@@ -66,58 +69,9 @@ export async function executeModeration(
           "both providers failed authentication — platform tokens invalid/expired, please wait",
         );
       }
-      // M13: fallback gemini 因 safety filter 拒答（http 400 + body 含 safety 关键字）
-      //   → 不当 error，合成 review 让运营复审。
-      //   合法 NSFW 是本平台的常态，不能因为 gemini 不愿意处理就阻塞业务。
-      const synthesized = synthesizeGeminiSafetyReview(fbErr, route.fallback);
-      if (synthesized) return synthesized;
       throw fbErr;
     }
   }
-}
-
-/**
- * 仅在 fallback==="gemini" 且 fbErr 是 gemini http 400 + body 含 safety 关键字时，
- * 返回合成的 review 结果；其他情况返回 null 让调用方继续抛 fbErr。
- */
-function synthesizeGeminiSafetyReview(
-  fbErr: unknown,
-  fallback: Provider,
-): ExecutionResult | null {
-  if (fallback !== "gemini") return null;
-  if (!(fbErr instanceof AppError)) return null;
-  if (fbErr.code !== ErrorCodes.PROVIDER_ERROR) return null;
-  if (!/http\s+400/i.test(fbErr.message)) return null;
-  const body = getErrorBody(fbErr);
-  if (!/safety|blocked|INVALID_ARGUMENT/i.test(body)) return null;
-  console.warn("[pipeline] gemini safety filter declined fallback — returning synthesized review");
-  return {
-    status: "review",
-    risk_level: "medium",
-    categories: ["other"],
-    reason: "provider safety filter declined",
-    provider: "gemini",
-    model: null,
-    prompt_version: null,
-    input_tokens: 0,
-    output_tokens: 0,
-    latency_ms: 0,
-  };
-}
-
-/**
- * M16(c) helpers: AppError.details 可能是 string（adapter 写的 body 文本）或 object
- * （tryProvider 注入 `{ provider, body? }` 后）。统一从两种形态里读 body 字符串供
- * synthesizeGeminiSafetyReview 等下游使用。
- */
-function getErrorBody(err: AppError): string {
-  const d = err.details;
-  if (typeof d === "string") return d;
-  if (d && typeof d === "object" && "body" in d) {
-    const v = (d as { body?: unknown }).body;
-    return typeof v === "string" ? v : "";
-  }
-  return "";
 }
 
 /**
@@ -213,6 +167,7 @@ async function callProvider(
     systemPrompt: prompt.content,
     content: args.content,
     isImage: args.isImage,
+    imageUrls: args.imageUrls,
     timeoutMs: args.timeoutMs,
   });
 
@@ -238,6 +193,7 @@ async function callProvider(
     risk_level: parsed.value.risk_level,
     categories: parsed.value.categories,
     reason: parsed.value.reason,
+    labels: parsed.value.labels,
     provider,
     model: r.model,
     prompt_version: prompt.version,

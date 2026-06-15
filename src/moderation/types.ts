@@ -25,6 +25,7 @@ export interface ModerationJob {
   biz_id: string;
   user_id: string | null;
   content: string;
+  image_urls?: string[] | null; // post 多图/视频帧
   callback_url: string;
   extra: Record<string, unknown> | null;
   created_at_ms: number;

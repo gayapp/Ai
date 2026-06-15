@@ -45,7 +45,7 @@ describe("admin prompts", () => {
     expect(body.results[0].prompt_preview).toContain("Since N=1");
   });
 
-  it("serializes Gemini moderate dry-run samples to avoid quota bursts", async () => {
+  it.skip("serializes Gemini moderate dry-run samples to avoid quota bursts (gemini retired 2026-06-04)", async () => {
     const app = makeApp();
     let inFlight = 0;
     let maxInFlight = 0;
@@ -94,7 +94,7 @@ describe("admin prompts", () => {
     expect(maxInFlight).toBe(1);
   });
 
-  it("retries transient Gemini 429 responses during moderate dry-run", async () => {
+  it.skip("retries transient Gemini 429 responses during moderate dry-run (gemini retired 2026-06-04)", async () => {
     const app = makeApp();
     let calls = 0;
     vi.stubGlobal("fetch", vi.fn(async () => {
@@ -138,7 +138,7 @@ describe("admin prompts", () => {
     expect(calls).toBe(2);
   });
 
-  it("surfaces Gemini daily quota errors without repeated short retries", async () => {
+  it.skip("surfaces Gemini daily quota errors without repeated short retries (gemini retired 2026-06-04)", async () => {
     const app = makeApp();
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       error: {
