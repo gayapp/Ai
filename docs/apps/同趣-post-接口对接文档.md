@@ -210,6 +210,24 @@ assert hmac.compare_digest(expected, request.headers["x-signature"])
 
 回调投递失败重试：`1min → 5min → 30min → 2h → 12h`，5 次后进 DLQ；请按 `request_id` **幂等**处理。
 
+### 5.1 单条轮询 `GET /v1/moderate/{request_id}`
+
+回调丢失/对账时可主动拉取（**对空 body 签名**，头同 §2）：
+
+```json
+{
+  "request_id": "01HXYZ-...",
+  "status": "pass",
+  "result": { "status": "pass", "risk_level": "safe", "categories": [], "reason": "...", "labels": [ /* 同 4.2，post 含逐类标签 */ ] },
+  "provider": "grok", "model": "grok-4.3", "cached": false,
+  "tokens": { "input": 1057, "output": 208 }, "latency_ms": 15845,
+  "created_at": "...", "completed_at": "..."
+}
+```
+
+- `result.labels` 与 sync 响应 / callback **完全一致**（post 行返回七类标签；非 post 行无此字段）。
+- moderate **没有** analyze 那种 pull/ack 批量游标；要批量对账请逐条 GET（按 `request_id`），或以 callback 为准。
+
 ---
 
 ## 6. 调用示例（Python · httpx/requests）

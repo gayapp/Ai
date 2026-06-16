@@ -338,6 +338,8 @@ moderateRouter.get("/v1/moderate/:id", async (c) => {
       risk_level: row.risk_level,
       categories: row.categories ? JSON.parse(row.categories) : [],
       reason: row.reason,
+      // post 结构化标签（与 sync 响应 / callback 一致）；非 post 行无此字段。
+      ...(row.labels ? { labels: JSON.parse(row.labels) } : {}),
     },
     provider: row.provider,
     model: row.model,

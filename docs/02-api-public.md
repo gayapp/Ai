@@ -127,7 +127,7 @@ function sign(secret, body) {
 
 ## `GET /v1/moderate/{request_id}` — 查询结果
 
-用于幂等复查（例如应用侧回调接收失败后重新拉取）。
+用于幂等复查（例如应用侧回调接收失败后重新拉取）。`result` 含与回调一致的字段，`post` 请求会带 `result.labels`（逐类结构化标签）。
 
 **Headers**：同上，对空 body 签名即可。
 
