@@ -3,7 +3,9 @@ import {
   BACKPRESSURE_HARD_LIMIT,
   PENDING_COUNT_KV_KEY,
   RETRY_AFTER_SECONDS,
+  armBackpressureCanary,
   enforceBackpressure,
+  getBackpressureCanary,
   getBacklogSeverity,
   getPendingCountCached,
 } from "../src/analyze/backpressure.ts";
@@ -17,6 +19,26 @@ class FakeKV {
 
   async put(key: string, value: string): Promise<void> {
     this.store.set(key, value);
+  }
+
+  async delete(key: string): Promise<void> {
+    this.store.delete(key);
+  }
+}
+
+class FakeD1 {
+  constructor(private readonly pendingCount: number) {}
+
+  prepare(_sql: string): FakeStmt {
+    return new FakeStmt(this.pendingCount);
+  }
+}
+
+class FakeStmt {
+  constructor(private readonly pendingCount: number) {}
+
+  async first<T>(): Promise<T> {
+    return { n: this.pendingCount } as T;
   }
 }
 
@@ -70,6 +92,14 @@ describe("backpressure · getPendingCountCached", () => {
     expect(await getPendingCountCached(env)).toBe(0);
   });
 
+  it("falls back to D1 and backfills KV on cache miss", async () => {
+    const kv = new FakeKV();
+    const env = { NONCE: kv, DB: new FakeD1(42) } as unknown as Env;
+
+    expect(await getPendingCountCached(env)).toBe(42);
+    expect(kv.store.get(PENDING_COUNT_KV_KEY)).toBe("42");
+  });
+
   it("parses integer from KV", async () => {
     const kv = new FakeKV();
     await kv.put(PENDING_COUNT_KV_KEY, "150");
@@ -82,6 +112,15 @@ describe("backpressure · getPendingCountCached", () => {
     await kv.put(PENDING_COUNT_KV_KEY, "not-a-number");
     const env = { NONCE: kv } as unknown as Env;
     expect(await getPendingCountCached(env)).toBe(0);
+  });
+
+  it("refreshes malformed KV value from D1 when available", async () => {
+    const kv = new FakeKV();
+    await kv.put(PENDING_COUNT_KV_KEY, "not-a-number");
+    const env = { NONCE: kv, DB: new FakeD1(17) } as unknown as Env;
+
+    expect(await getPendingCountCached(env)).toBe(17);
+    expect(kv.store.get(PENDING_COUNT_KV_KEY)).toBe("17");
   });
 });
 
@@ -129,5 +168,69 @@ describe("backpressure · enforceBackpressure", () => {
 
     expect(result).toBeNull();
     expect(ctx.setHeaders.get("X-Analyze-Backlog-Severity")).toBe("warn");
+  });
+
+  it("forces one matching canary request into the 503 overload path", async () => {
+    const kv = new FakeKV();
+    const env = { NONCE: kv } as unknown as Env;
+    await kv.put(PENDING_COUNT_KV_KEY, "0");
+    await armBackpressureCanary(env, {
+      appId: "app_irc",
+      bizType: "media_analysis",
+      bizId: "canary-video-1",
+      ttlSeconds: 60,
+      armedBy: "test",
+    });
+
+    const first = makeContext(kv);
+    const forced = await enforceBackpressure(
+      first as unknown as Parameters<typeof enforceBackpressure>[0],
+      undefined,
+      { appId: "app_irc", bizType: "media_analysis", bizId: "canary-video-1" },
+    );
+
+    expect(forced).not.toBeNull();
+    expect(forced!.status).toBe(503);
+    expect(forced!.headers.get("X-Analyze-Backpressure-Canary")).toBe("1");
+    expect(forced!.headers.get("X-Analyze-Backlog-Severity")).toBe("crit");
+    const body = await forced!.json() as { error_code: string; canary: boolean };
+    expect(body.error_code).toBe("backlog_overload");
+    expect(body.canary).toBe(true);
+    expect(await getBackpressureCanary(env, "app_irc")).toBeNull();
+
+    const second = makeContext(kv);
+    const normal = await enforceBackpressure(
+      second as unknown as Parameters<typeof enforceBackpressure>[0],
+      undefined,
+      { appId: "app_irc", bizType: "media_analysis", bizId: "canary-video-1" },
+    );
+    expect(normal).toBeNull();
+    expect(second.setHeaders.get("X-Analyze-Backlog-Severity")).toBe("ok");
+  });
+
+  it("does not force non-matching canary requests", async () => {
+    const kv = new FakeKV();
+    const env = { NONCE: kv } as unknown as Env;
+    await kv.put(PENDING_COUNT_KV_KEY, "0");
+    await armBackpressureCanary(env, {
+      appId: "app_irc",
+      bizType: "media_intro",
+      bizId: "intro-canary",
+      ttlSeconds: 60,
+      armedBy: "test",
+    });
+
+    const ctx = makeContext(kv);
+    const result = await enforceBackpressure(
+      ctx as unknown as Parameters<typeof enforceBackpressure>[0],
+      undefined,
+      { appId: "app_irc", bizType: "media_analysis", bizId: "intro-canary" },
+    );
+
+    expect(result).toBeNull();
+    expect(ctx.setHeaders.get("X-Analyze-Backlog-Severity")).toBe("ok");
+    expect(await getBackpressureCanary(env, "app_irc")).toEqual(
+      expect.objectContaining({ biz_type: "media_intro", biz_id: "intro-canary" }),
+    );
   });
 });

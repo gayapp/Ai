@@ -35,6 +35,7 @@ declare global {
     DEFAULT_RATE_LIMIT_QPS: string;
     LOG_LEVEL: string;
     SAVE_EVIDENCE?: string; // "true" 才启用 R2 证据保存
+    ALERTS_DISABLED?: string; // "true" 则全平台告警静默（dev 用，避免无真实流量的环境刷告警）
   }
 }
 

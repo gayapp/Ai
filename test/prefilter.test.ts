@@ -49,6 +49,18 @@ describe("prefilter · applyPrefilter L1 (low signal)", () => {
     const r = applyPrefilter("avatar", "https://picsum.photos/300");
     expect(r.kind).toBe("skip");
   });
+
+  it("post skips L1 low-signal pass (images carry the risk)", () => {
+    // emoji/空标题不能因文本短而放行——图片才是风险载体。
+    expect(applyPrefilter("post", "😀😀").kind).toBe("skip");
+    expect(applyPrefilter("post", "").kind).toBe("skip");
+  });
+
+  it("post still runs L2 ad rules on the caption", () => {
+    const r = applyPrefilter("post", "看主页 加V abc12345");
+    expect(r.kind).toBe("reject_ad");
+    expect(r.result?.categories).toEqual(["ad"]);
+  });
 });
 
 describe("prefilter · applyPrefilter L2 (ad blacklist)", () => {

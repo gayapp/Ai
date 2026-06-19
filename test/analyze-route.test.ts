@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { armBackpressureCanary } from "../src/analyze/backpressure.ts";
 import { analyzeRouter } from "../src/routes/analyze.ts";
 import { hmacSha256Hex, sha256Hex } from "../src/lib/hash.ts";
 import type { AnalyzeRow } from "../src/analyze/types.ts";
@@ -134,6 +135,52 @@ describe("POST /v1/analyze", () => {
         biz_type: "media_analysis",
       }),
     ]);
+  });
+
+  it("honors a one-shot canary overload gate before D1 insert and queue send", async () => {
+    const body = JSON.stringify({
+      biz_type: "media_analysis",
+      biz_id: "canary-video-1",
+      input: {
+        title: "Canary",
+        image_urls: ["https://cdn.example.com/canary.jpg"],
+      },
+    });
+    const db = new FakeD1();
+    const nonce = new MemKV();
+    const analyzeQueue = new MemQueue<object>();
+    const env = {
+      DB: db,
+      NONCE: nonce,
+      APPS: new MemKV(),
+      ANALYZE_QUEUE: analyzeQueue,
+      DEFAULT_RATE_LIMIT_QPS: "50",
+    } as unknown as Env;
+    await armBackpressureCanary(env, {
+      appId: db.app.id,
+      bizType: "media_analysis",
+      bizId: "canary-video-1",
+      ttlSeconds: 60,
+      armedBy: "test",
+    });
+    const headers = await signedHeaders(db.app.id, db.app.secret, body);
+
+    const res = await analyzeRouter.fetch(
+      new Request("http://local/v1/analyze", {
+        method: "POST",
+        headers,
+        body,
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("X-Analyze-Backpressure-Canary")).toBe("1");
+    const payload = await res.json() as { error_code: string; canary: boolean };
+    expect(payload.error_code).toBe("backlog_overload");
+    expect(payload.canary).toBe(true);
+    expect(db.analyzeRows).toHaveLength(0);
+    expect(analyzeQueue.sent).toHaveLength(0);
   });
 });
 

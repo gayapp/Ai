@@ -12,7 +12,7 @@ import {
 import { AnalyzeCallbackBody, type AnalyzeCallbackBody as AnalyzeCallbackBodyT } from "../analyze/schema/callback.ts";
 import { analyzeErrorMessage } from "../analyze/pipeline/dispatcher.ts";
 import type { AnalyzeRow } from "../analyze/types.ts";
-import { CallbackBody, Category, RiskLevel, type CallbackBody as CallbackBodyT } from "../moderation/schema.ts";
+import { CallbackBody, Category, ModerationLabel, RiskLevel, type CallbackBody as CallbackBodyT } from "../moderation/schema.ts";
 import type { AppConfig, CallbackJob } from "../moderation/types.ts";
 import { signCallbackBody } from "./signer.ts";
 
@@ -73,6 +73,7 @@ async function processModerationCallback(
     cached: !!row.cached,
     tokens: { input: row.input_tokens ?? 0, output: row.output_tokens ?? 0 },
     latency_ms: row.latency_ms ?? 0,
+    labels: toLabels(row.labels),
     extra: row.extra ? safeJson(row.extra) : undefined,
     created_at: new Date(row.completed_at ?? row.created_at).toISOString(),
   });
@@ -283,6 +284,23 @@ function toCategories(s: string | null): Array<"politics" | "porn" | "abuse" | "
     return out;
   } catch {
     return [];
+  }
+}
+
+/** 解析库里存的 labels JSON（post）。无/不合规返回 undefined（回调里省略该字段）。 */
+function toLabels(s: string | null): ModerationLabel[] | undefined {
+  if (!s) return undefined;
+  try {
+    const arr = JSON.parse(s) as unknown[];
+    if (!Array.isArray(arr)) return undefined;
+    const out: ModerationLabel[] = [];
+    for (const x of arr) {
+      const r = ModerationLabel.safeParse(x);
+      if (r.success) out.push(r.data);
+    }
+    return out.length ? out : undefined;
+  } catch {
+    return undefined;
   }
 }
 

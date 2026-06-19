@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Apps, Stats, type AppConfig, type ModerationRow } from "../lib/api";
 import { RequestRow } from "../components/common";
 
-const BIZ = ["", "comment", "nickname", "bio", "avatar"];
+const BIZ = ["", "comment", "nickname", "bio", "avatar", "post"];
 const STATUS = ["", "pass", "reject", "review", "error", "pending"];
 
 export default function RequestsPage() {

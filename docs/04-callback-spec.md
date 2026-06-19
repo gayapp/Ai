@@ -46,7 +46,7 @@ X-Request-Id: <request_id>
 | `schema_version` | string | 当前固定 `"1.0"` | 破坏性变更才会升 major |
 | `request_id` | string | UUIDv7 | 本次审核唯一 ID |
 | `app_id` | string | `app_*` | 应用 ID |
-| `biz_type` | enum | `comment \| nickname \| bio \| avatar` | 业务类型 |
+| `biz_type` | enum | `comment \| nickname \| bio \| avatar \| post` | 业务类型（`post`=社区帖子图文/视频，2026-06 新增枚举值，向后兼容） |
 | `biz_id` | string | ≤128 | 应用侧提交时的业务 ID |
 | `user_id` | string \| null | ≤128 | 应用侧提交时的 user_id，可空 |
 | **`status`** | enum | `pass \| reject \| review \| error` | **最终判定** |
@@ -60,8 +60,30 @@ X-Request-Id: <request_id>
 | `tokens.input` | integer | | 输入 token 数 |
 | `tokens.output` | integer | | 输出 token 数 |
 | `latency_ms` | integer | | 端到端耗时（含队列等待） |
+| `labels` | object[] \| 缺省 | 见下 | **仅 `biz_type=post`** 返回的逐类结构化标签；其他类型不含此字段，旧消费方忽略即可 |
 | `extra` | object | ≤4KB | 应用提交时的 `extra` 原样回传 |
 | `created_at` | string | ISO-8601 | 审核完成时间（不是请求时间） |
+
+### `labels` 取值（仅 `biz_type=post`）
+
+对图文/视频帖逐类回答"是否有(detected) + 是什么(evidence)"，每个 category 一条：
+
+```json
+"labels": [
+  { "category": "minor_face", "detected": true, "confidence": 0.82, "evidence": "第2张图出现疑似未成年男性面孔" },
+  { "category": "csam",       "detected": false, "confidence": 0,    "evidence": "" }
+]
+```
+
+| 子字段 | 类型 | 说明 |
+|--------|------|------|
+| `category` | enum | `minor_face \| csam \| ad \| drug \| gambling \| politics \| nsfw` |
+| `detected` | boolean | 是否检出该类内容 |
+| `confidence` | number | 0~1 置信度 |
+| `evidence` | string | ≤512，"是什么"——命中位置/描述，未命中为空串 |
+
+- 6 类零容忍（`csam/ad/drug/gambling/politics` + `minor_face` 触发复核）驱动 `status`；`nsfw` 为合法成人内容，仅描述、不影响判定。
+- 该字段只增不删；纯文字帖（无图）可能不含 `labels`。
 
 ### `provider` 字段语义（NULL 的合法场景）
 

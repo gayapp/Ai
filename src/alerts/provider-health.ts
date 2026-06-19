@@ -4,8 +4,11 @@
  * 两条路径：
  *  1. 实时反应：pipeline 捕获 401/403 时 → alertProviderAuthFailed()
  *     → 立刻 Telegram crit + （可选）邮件
- *  2. 主动巡检（Cron 每 5 min）：checkProviderHealth() 调 xAI /v1/api-key
- *     → 发现 blocked / disabled → 告警；team_blocked 单独走 crit + console 链接
+ *  2. 主动巡检（Cron 每 5 min）：checkProviderHealth() 用推理 Bearer 轻探 xAI /v1/models
+ *     → 200 = key 有效且推理可达；401/403 = key 失效/被封 → crit 告警
+ *     （旧版打 /v1/api-key 取 team_blocked/disabled 细分，但 xAI 2026-05 在 api.x.ai
+ *      上下线了该端点，打它恒返 400 误报；key 状态查询已迁到独立的 management-api.x.ai，
+ *      需单独 management token，暂未接入。细分原因的 switch 分支保留以备将来。）
  *
  * Gemini 没有类似的 key-status 公开端点；只能靠路径 1 反应式。
  */
@@ -31,9 +34,32 @@ async function bumpRecurrence(
 ): Promise<number> {
   const k = `${RECUR_COUNT_KEY_PREFIX}${provider}:${reason}`;
   const raw = await kv.get(k);
-  const prev = raw ? parseInt(raw, 10) : 0;
-  const next = (Number.isFinite(prev) ? prev : 0) + 1;
-  await kv.put(k, String(next), { expirationTtl: RECUR_WINDOW_SECONDS });
+  const now = Date.now();
+  let count = 0;
+  let windowStartMs = now;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as { count?: number; windowStartMs?: number };
+      if (
+        typeof parsed.windowStartMs === "number" &&
+        now - parsed.windowStartMs < RECUR_WINDOW_SECONDS * 1000
+      ) {
+        // 仍在同一 24h 窗内：累加，窗口起点不变
+        count = Number.isFinite(parsed.count) ? (parsed.count as number) : 0;
+        windowStartMs = parsed.windowStartMs;
+      }
+      // 否则窗口已过期 → count 归零、窗口起点设为 now
+    } catch {
+      // 旧版纯数字格式或脏数据 → 当作新窗口起点
+    }
+  }
+  const next = count + 1;
+  // 必须显式存窗口起点：旧实现每次 put 都把 TTL 重置成 24h，持续故障下计数器
+  // 永不过期，会把"24h 内 N 次"虚标成"事件起累计 N 次"（曾累计到数千）。
+  // TTL 给 25h 兜底（比窗口略长），确保静默后最终清理。
+  await kv.put(k, JSON.stringify({ count: next, windowStartMs }), {
+    expirationTtl: RECUR_WINDOW_SECONDS + 3600,
+  });
   return next;
 }
 
@@ -101,14 +127,9 @@ export async function alertProviderAuthFailed(
 // 主动巡检（Cron 调用）
 // ============================================================
 
-interface XaiKeyStatus {
-  api_key_blocked: boolean;
-  api_key_disabled: boolean;
-  team_blocked: boolean;
-  redacted_api_key?: string;
-}
-
-/** xAI 健康检查的归类原因 —— 用于 dedupKey / 告警分级（M11） */
+/** xAI 健康检查的归类原因 —— 用于 dedupKey / 告警分级（M11）。
+ *  team_blocked / api_key_blocked / api_key_disabled 三个细分原因现已不由 /v1/models
+ *  轻探产生（需 management-api.x.ai 才能拿到），但保留枚举与告警分支以备将来接入。 */
 export type XaiHealthReason =
   | "team_blocked"
   | "api_key_blocked"
@@ -129,7 +150,9 @@ async function checkXai(env: Env): Promise<{
   if (!key) return { ok: false, reason: "not_configured", detail: "GROK_API_KEY not set" };
 
   try {
-    const res = await fetch("https://api.x.ai/v1/api-key", {
+    // 用 OpenAI 兼容的 /v1/models 轻探：同一个推理 Bearer，200 = key 有效且推理可达。
+    // 这正是审核链路（POST /v1/chat/completions）需要的能力。401/403 = key 失效/被封。
+    const res = await fetch("https://api.x.ai/v1/models", {
       headers: { authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(8000),
     });
@@ -137,13 +160,20 @@ async function checkXai(env: Env): Promise<{
       return { ok: false, reason: "unauthorized", detail: `key unauthorized (http ${res.status})` };
     }
     if (!res.ok) {
-      return { ok: false, reason: "http_error", detail: `http ${res.status}` };
+      let body = "";
+      try {
+        body = (await res.text()).slice(0, 200);
+      } catch {
+        // ignore
+      }
+      // xAI 把「无效 API key」返成 400 invalid-argument（而非 401），body 含 "Incorrect API key"。
+      // 必须识别为鉴权失败，否则 key 真失效会被当成上游抖动 warn 漏报。
+      if (res.status === 400 && /api key/i.test(body)) {
+        return { ok: false, reason: "unauthorized", detail: `key rejected (http 400): ${body}` };
+      }
+      return { ok: false, reason: "http_error", detail: `http ${res.status}${body ? `: ${body}` : ""}` };
     }
-    const data = (await res.json()) as XaiKeyStatus;
-    if (data.team_blocked) return { ok: false, reason: "team_blocked", raw: data };
-    if (data.api_key_blocked) return { ok: false, reason: "api_key_blocked", raw: data };
-    if (data.api_key_disabled) return { ok: false, reason: "api_key_disabled", raw: data };
-    return { ok: true, raw: data };
+    return { ok: true };
   } catch (e) {
     return {
       ok: false,

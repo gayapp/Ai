@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>同趣社区帖子审核 — ai-guard 端实现方案</title>
+<style>
+:root{--bg:#fff;--soft:#f8fafc;--border:#e2e8f0;--text:#0f172a;--muted:#475569;--primary:#2563eb;--danger:#dc2626;--ok:#16a34a;--warn:#d97706}
+*{box-sizing:border-box}body{margin:0;font:15px/1.75 "Segoe UI","Microsoft YaHei",sans-serif;color:var(--text);background:var(--bg)}
+aside{position:fixed;inset:0 auto 0 0;width:290px;overflow:auto;padding:24px 18px;background:var(--soft);border-right:1px solid var(--border)}
+aside h2{font-size:13px;text-transform:uppercase;color:var(--muted);letter-spacing:.08em}
+aside a{display:block;padding:5px 8px;border-radius:6px;color:var(--text);text-decoration:none;font-size:14px}
+aside a:hover{background:var(--primary);color:white}.toc-l3{padding-left:20px;font-size:13px;color:var(--muted)}
+main{margin-left:290px;max-width:1080px;padding:44px 64px}
+header{border-bottom:3px solid var(--primary);padding-bottom:20px;margin-bottom:34px}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;border-bottom:1px solid var(--border);padding-bottom:8px;color:#1e40af}h3{margin-top:28px;color:#1e3a8a}
+.meta{display:flex;flex-wrap:wrap;gap:12px 22px;color:var(--muted);font-size:13px}
+.meta b{color:var(--text)}
+code{background:#eef2ff;color:#3730a3;padding:2px 5px;border-radius:4px;font-family:"Cascadia Code",Consolas,monospace;font-size:13px}
+pre{background:#0f172a;color:#e2e8f0;padding:16px 18px;border-radius:8px;overflow:auto;font-size:13px}
+pre code{background:transparent;color:inherit;padding:0}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+th,td{border:1px solid var(--border);padding:9px 11px;text-align:left;vertical-align:top}th{background:var(--soft)}
+blockquote{border-left:4px solid var(--primary);background:#eff6ff;margin:16px 0;padding:10px 16px}
+.danger{color:var(--danger);font-weight:700}.ok{color:var(--ok);font-weight:600}.warn{color:var(--warn);font-weight:600}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600}
+.tag.new{background:#dcfce7;color:#166534}.tag.zero{background:#fee2e2;color:#991b1b}.tag.desc{background:#e0e7ff;color:#3730a3}
+.pill{display:inline-block;background:#0f172a;color:#fff;border-radius:6px;padding:2px 8px;font-size:12px;margin-right:6px}
+ul{margin:8px 0}li{margin:3px 0}
+.flow{background:var(--soft);border:1px solid var(--border);border-radius:8px;padding:14px 18px;font-size:14px;line-height:2}
+.legend{font-size:13px;color:var(--muted)}
+.checklist li{list-style:none;margin-left:-20px}
+@media(max-width:900px){aside{position:static;width:auto}main{margin-left:0;padding:24px}}
+</style>
+</head>
+<body>
+<aside>
+<h2>目录</h2>
+<a href="#ctx">0. 背景与目标</a>
+<a href="#decisions">1. 关键设计决策</a>
+<a class="toc-l3" href="#d-onetype">1.1 统一 biz_type='post'</a>
+<a class="toc-l3" href="#d-vision">1.2 视觉模型按请求动态选</a>
+<a class="toc-l3" href="#d-labels">1.3 结构化标签 labels</a>
+<a href="#contract">2. 对外契约</a>
+<a class="toc-l3" href="#c-req">2.1 请求</a>
+<a class="toc-l3" href="#c-resp">2.2 响应（含 labels）</a>
+<a class="toc-l3" href="#c-labels">2.3 labels 字段定义</a>
+<a href="#flow">3. 端到端链路</a>
+<a href="#changes">4. 代码改动清单</a>
+<a class="toc-l3" href="#ch-schema">4.1 Schema / 契约</a>
+<a class="toc-l3" href="#ch-pipeline">4.2 多图贯穿管线</a>
+<a class="toc-l3" href="#ch-route">4.3 路由 / 异步 / 回调</a>
+<a class="toc-l3" href="#ch-prefilter">4.4 前置漏斗（修正点）</a>
+<a class="toc-l3" href="#ch-prompt">4.5 Prompt 种子</a>
+<a class="toc-l3" href="#ch-db">4.6 持久化</a>
+<a class="toc-l3" href="#ch-admin">4.7 管理后台</a>
+<a class="toc-l3" href="#ch-docs">4.8 文档 / 启用</a>
+<a href="#edge">5. 边界与约定</a>
+<a href="#verify">6. 验证方案</a>
+<a href="#files">7. 受影响文件</a>
+</aside>
+<main>
+<header>
+<h1>同趣 · 社区帖子（图文 / 视频）审核 — ai-guard 端实现方案</h1>
+<div class="meta">
+<span><b>对接 App：</b><code>app_79e81a7183747039</code></span>
+<span><b>日期：</b>2026-06-15</span>
+<span><b>通道：</b>moderate（<code>/v1/moderate</code>）</span>
+<span><b>状态：</b>设计已定稿，待开发</span>
+</div>
+</header>
+
+<p>本文档是 <code>docs/apps/同趣-社区帖子图文视频审核需求.md</code> 的 ai-guard 端落地方案，覆盖三类发帖审核（纯文字帖 / 图文帖 / 视频帧帖），并按追加需求提供<strong>逐类结构化标签</strong>。</p>
+
+<h2 id="ctx">0. 背景与目标</h2>
+<p>同趣现有接入只覆盖 <code>comment / nickname / bio / avatar</code>，其中 <strong>avatar 是单张图片 URL</strong>。社区发帖审核分三类：</p>
+<ul>
+<li><strong>纯文字帖</strong> —— 只有标题/正文。</li>
+<li><strong>图文帖</strong> —— 标题/正文 + 1~N 张图片。</li>
+<li><strong>视频帖</strong> —— 同趣 VPS 先把视频<strong>间隔抽帧</strong>成 N 张帧图，再当"多图"送审（<span class="ok">ai-guard 无需视频解码</span>）。</li>
+</ul>
+<p><b>目标产出：</b><code>/v1/moderate</code> 接受 <code>biz_type='post'</code> + <code>image_urls[]</code>，对一帖的文字与多图/多帧<strong>综合出单一 verdict</strong>，并额外返回 6+1 类结构化标签；支持 sync / auto（超时降级异步 + 回调）；后台完善到"枚举接入 + 多图查看 + 标签展示"。</p>
+<blockquote><span class="danger">铁律对齐：</span>平台定位为成人男同社交 App 审核中间层 —— 合法 NSFW / 裸露 / 男同色情 <strong>绝不 reject</strong>，仅 <strong>CSAM / 广告引流 / 毒品 / 赌博 / 政治敏感</strong> 零容忍。</blockquote>
+
+<h2 id="decisions">1. 关键设计决策</h2>
+
+<h3 id="d-onetype">1.1 统一一个 <code>biz_type='post'</code> 覆盖三类</h3>
+<p>视频帧 = <code>image_urls</code>（需求 §2.3），所以"视频帖"和"图文帖"走<strong>完全相同的代码路径</strong>，仅靠 <code>extra.post_type</code> 区分（平台侧统计用，可选）。<strong>纯文字帖也用 <code>post</code></strong>（<code>image_urls</code> 留空），<span class="warn">不与 <code>comment</code> 合并</span> —— 帖子是顶层长内容，审核标准与可观测性应与评论分离，且让同趣一个 endpoint 形态搞定全部发帖审核。</p>
+
+<h3 id="d-vision">1.2 视觉模型按"单次请求"动态决定</h3>
+<p>不按 biz_type 写死视觉开关，而是看请求是否带图：</p>
+<table>
+<tr><th>请求形态</th><th>模型</th><th>说明</th></tr>
+<tr><td>post + <code>image_urls</code> 为空（纯文字帖）</td><td><code>grok-4-fast-non-reasoning</code></td><td>文本模型，便宜快，可同步</td></tr>
+<tr><td>post + <code>image_urls</code> 非空（图文 / 视频帖）</td><td><code>grok-4</code>（vision）</td><td>多图一次性送入，综合判定</td></tr>
+</table>
+<p>派生 helper：<code>requestIsImage(biz, image_urls) = biz==='avatar' || (biz==='post' && image_urls?.length&gt;0)</code>。</p>
+
+<h3 id="d-labels">1.3 结构化标签 <code>labels</code>（追加需求 · 重点）</h3>
+<p>图文/视频帖除 verdict 外，要像 IRC 端 Analyze 那样给出<strong>逐类标签</strong>：对每一类回答"<strong>是否有(detected) + 是什么(evidence)</strong>"。</p>
+<blockquote><b>做法：不另走 analyze 重型通道</b>，而是在 moderate 输出上扩展一个<strong>可选 <code>labels</code> 数组</strong>，直接复用 Analyze 的 <code>ViolationSchema</code> 形状（<code>{category, detected, confidence, evidence}</code>，见 <code>src/analyze/schema/media-analysis.ts</code> L15-22）。这样同趣<strong>一次 sync 调用</strong>即拿到 verdict + 结构化标签，无需 analyze 的 queue / pull / ack / result_json 那套机制。</blockquote>
+<p class="legend"><b>为什么不走 analyze：</b>analyze 是队列驱动、pull/callback 交付、另一套重型契约，与同趣"默认同步拿结论"冲突；而 analyze 的 <code>violations</code> 与 <code>face_coordinates</code> 恰好就是本需求要的"是否有X + 是什么"，把这个形状借到 moderate 输出里即可，代价最小。</p>
+<p><b>标签分类（6 类零容忍 + 1 类描述性）：</b></p>
+<table>
+<tr><th>category</th><th>含义</th><th>对 verdict 的影响</th></tr>
+<tr><td><code>minor_face</code></td><td>疑似未成年人面孔出现</td><td><span class="warn">detected 但无性化 → review（提示人工复核）</span></td></tr>
+<tr><td><code>csam</code> <span class="tag zero">零容忍</span></td><td>未成年性化</td><td><span class="danger">detected → reject</span></td></tr>
+<tr><td><code>ad</code> <span class="tag zero">零容忍</span></td><td>广告引流</td><td><span class="danger">detected → reject</span></td></tr>
+<tr><td><code>drug</code> <span class="tag zero">零容忍</span></td><td>毒品</td><td><span class="danger">detected → reject</span></td></tr>
+<tr><td><code>gambling</code> <span class="tag zero">零容忍</span></td><td>赌博</td><td><span class="danger">detected → reject</span></td></tr>
+<tr><td><code>politics</code> <span class="tag zero">零容忍</span></td><td>政治敏感</td><td><span class="danger">detected → reject</span></td></tr>
+<tr><td><code>nsfw</code> <span class="tag desc">描述性</span></td><td>合法成人内容（裸露/男同色情）</td><td><span class="ok">detected 可为 true，但不影响判定</span></td></tr>
+</table>
+
+<h2 id="contract">2. 对外契约</h2>
+
+<h3 id="c-req">2.1 请求 <code>POST /v1/moderate</code></h3>
+<pre><code>{
+  "biz_type": "post",
+  "biz_id": "01HXYZ_post_ulid",
+  "content": "帖子标题\n帖子正文",
+  "image_urls": [
+    "https://f000.backblazeb2.com/file/duanvideo/temp/.../0.webp",
+    "https://f000.backblazeb2.com/file/duanvideo/temp/.../1.webp"
+  ],
+  "user_id": "u_12345",
+  "mode": "sync",
+  "extra": { "post_type": "image", "media_count": 2 }
+}</code></pre>
+<p class="legend">约束：<code>image_urls</code> 为 <code>https://</code> 公网图，数组 ≤12；post 的 <code>content</code> 与 <code>image_urls</code> 至少其一非空；非 post 禁带 <code>image_urls</code>。</p>
+
+<h3 id="c-resp">2.2 同步响应（沿用现结构 + 新增 <code>labels</code>）</h3>
+<pre><code>{
+  "request_id": "01HXYZ-...",
+  "cached": false,
+  "result": {
+    "status": "reject",
+    "risk_level": "high",
+    "categories": ["porn", "ad"],
+    "reason": "第2张图含未成年性化嫌疑，第3张图含微信引流",
+    "labels": [
+      { "category": "minor_face", "detected": true,  "confidence": 0.82, "evidence": "第2张图出现疑似未成年男性面孔" },
+      { "category": "csam",       "detected": true,  "confidence": 0.71, "evidence": "第2张图未成年+裸露" },
+      { "category": "ad",         "detected": true,  "confidence": 0.90, "evidence": "第3张图右下角微信号 abc123" },
+      { "category": "drug",       "detected": false, "confidence": 0.0,  "evidence": "" },
+      { "category": "gambling",   "detected": false, "confidence": 0.0,  "evidence": "" },
+      { "category": "politics",   "detected": false, "confidence": 0.0,  "evidence": "" },
+      { "category": "nsfw",       "detected": true,  "confidence": 0.95, "evidence": "成人男性裸露（合法，不影响判定）" }
+    ]
+  }
+}</code></pre>
+<p class="legend">异步回调沿用 <code>04-callback-spec.md</code> 结构，同样追加可选 <code>labels</code>；<code>biz_id</code> / <code>extra</code> 原样回传；签名 <code>X-Signature = hex(HMAC-SHA256(secret, raw_body))</code>。</p>
+
+<h3 id="c-labels">2.3 <code>labels</code> 字段定义</h3>
+<table>
+<tr><th>字段</th><th>类型</th><th>说明</th></tr>
+<tr><td><code>category</code></td><td>enum</td><td><code>minor_face | csam | ad | drug | gambling | politics | nsfw</code></td></tr>
+<tr><td><code>detected</code></td><td>boolean</td><td>是否检出该类内容</td></tr>
+<tr><td><code>confidence</code></td><td>number 0~1</td><td>置信度，默认 0</td></tr>
+<tr><td><code>evidence</code></td><td>string ≤512</td><td>"是什么" —— 命中位置/描述（中文，指明第几张图/帧）</td></tr>
+</table>
+<blockquote><span class="danger">兼容承诺（铁律 1）：</span><code>biz_type</code> 枚举加 <code>post</code>、新增可选 <code>labels</code> 均为<strong>只增不删</strong>；旧消费方（如一起看）忽略未知字段，不报错。改动须过 <code>04-callback-spec.md</code> 评审。</blockquote>
+
+<h2 id="flow">3. 端到端链路</h2>
+<div class="flow">
+<span class="pill">1</span> <code>POST /v1/moderate</code> → HMAC 校验 + 限流<br>
+<span class="pill">2</span> 解析 <code>ModerateRequestSchema</code>（含 <code>image_urls</code>）→ 校验 biz_type 是否对该 app 启用<br>
+<span class="pill">3</span> <code>isImage = requestIsImage(...)</code>；<code>contentHash = computeContentHash(biz, content, image_urls)</code><br>
+<span class="pill">4</span> 前置漏斗：post <span class="warn">跳过 L1 低信噪</span>，仍跑 L2 广告正则（caption）<br>
+<span class="pill">5</span> dedup 命中 → 直接返回缓存结果<br>
+<span class="pill">6</span> 路由 <code>post → grok</code>；多图走 vision 模型，一次送入全部图<br>
+<span class="pill">7</span> 模型返回 → <code>ModelOutput</code> 校验（含 <code>labels</code>）→ 合并单 verdict<br>
+<span class="pill">8</span> 写库（含 <code>image_urls</code> / <code>labels</code>）+ 缓存；sync 直接返回 / auto 超时降级队列 + 回调
+</div>
+
+<h2 id="changes">4. 代码改动清单</h2>
+
+<h3 id="ch-schema">4.1 Schema / 契约 — <code>src/moderation/schema.ts</code></h3>
+<ul>
+<li><code>BizType</code> 枚举追加 <code>"post"</code>（只增不删）。</li>
+<li><code>ModerateRequestSchema</code>：新增 <code>image_urls: z.array(z.string().url().startsWith("https://")).max(12).optional()</code>；<code>content</code> 由 <code>min(1)</code> 放宽，用 <code>.superRefine</code> 保持各类型约束（非 post 必填且禁带 image_urls；post 二者至少其一）。</li>
+<li>新增 <code>LabelCategory</code> 枚举 + <code>ModerationLabel</code>（<code>{category, detected, confidence, evidence}</code>）。</li>
+<li><code>ModelOutput</code> / <code>CallbackBody</code> / 同步响应 / <code>CachedResult</code> 追加<strong>可选</strong> <code>labels</code>。</li>
+</ul>
+
+<h3 id="ch-pipeline">4.2 多图贯穿管线</h3>
+<ul>
+<li><code>dedup.ts</code>：<code>computeContentHash(biz, content, imageUrls?)</code> —— 仅当有图时按<strong>原序</strong>追加 <code>"\n"+imageUrls.join("\n")</code>；无图时与现状<span class="ok">逐字节一致</span>，不污染现有四类缓存。</li>
+<li><code>router.ts</code>：<code>ProviderCallArgs</code> 加 <code>imageUrls?</code>；<code>DEFAULT_ROUTE</code> 加 <code>post: {primary:"grok", fallback:null}</code>。</li>
+<li><code>grok.ts</code>：多图分支构造 <code>[text?] + N×image_url + [text]</code>，模型选 vision；新增含 <code>labels</code> 的 <code>POST_STRUCTURE_SUFFIX</code>。</li>
+<li><code>pipeline.ts</code>：<code>ExecuteArgs</code> / <code>callProvider</code> / <code>ExecutionResult</code> 透传 <code>imageUrls</code> 与 <code>labels</code>。</li>
+</ul>
+
+<h3 id="ch-route">4.3 路由 / 异步 / 回调</h3>
+<ul>
+<li><code>routes/moderate.ts</code>：<code>isImage</code> 改用 <code>requestIsImage</code>；hash 带 image_urls；<code>willRequireCallback</code> 覆盖 post；sync 响应带 <code>labels</code>。post 始终先试 sync，复用现有 <code>PROVIDER_TIMEOUT &amp;&amp; mode==='auto'</code> 降级。</li>
+<li><code>index.ts</code> + <code>types.ts</code>：<code>ModerationJob</code> 加 <code>image_urls?</code>；队列消费同样透传；<span class="warn">R2 证据保存收紧为仅 avatar</span>（post 帧图不当头像存）。</li>
+<li><code>callback/dispatcher.ts</code>：组装 <code>CallbackBody</code> 时从库读回 <code>labels</code>，异步回调也含标签。</li>
+</ul>
+
+<h3 id="ch-prefilter">4.4 前置漏斗（修正一个正确性风险）— <code>prefilter.ts</code></h3>
+<blockquote>post <strong>必须跳过 L1 低信噪 pass</strong>，否则"emoji 标题 + 违规图"会被误放行（图片才是风险载体）；但 <strong>保留 L2 广告正则</strong>跑在 caption 上。</blockquote>
+
+<h3 id="ch-prompt">4.5 Prompt 种子 — 新增 migration（只追加）</h3>
+<ul>
+<li>新文件 <code>migrations/00XX_seed_post_prompt.sql</code>，为 <code>(post, grok)</code> 插入 v1 active prompt。</li>
+<li>遵循铁律 0（成人男同定位 + 多图综合判定 + 仅 6 类零容忍 + 视频帧语境）。</li>
+<li><strong>必须产出 <code>labels</code></strong>：逐类给 <code>detected + evidence</code>，并据此推导 verdict（任一零容忍 detected → reject；<code>minor_face</code> 无性化 → review；<code>nsfw</code> 不影响）。</li>
+</ul>
+
+<h3 id="ch-db">4.6 持久化 — <code>moderation_requests</code></h3>
+<ul>
+<li>同一 migration：<code>ADD COLUMN image_urls TEXT;</code> + <code>ADD COLUMN labels TEXT;</code>（JSON，nullable，append-only）。</li>
+<li><code>db/queries.ts</code>：<code>recordPending</code> 写 <code>image_urls</code>，<code>recordCompleted</code> 写 <code>labels</code>。</li>
+<li><code>routes/admin-stats.ts</code>：详情 SELECT 带出两列。</li>
+</ul>
+
+<h3 id="ch-admin">4.7 管理后台 — <code>admin-ui/</code>（枚举接入 + 多图查看）</h3>
+<ul>
+<li><code>lib/api.ts</code>：<code>BizType</code> 加 <code>"post"</code>；详情类型加 <code>image_urls</code> / <code>labels</code>。</li>
+<li><code>Apps.tsx</code> / <code>Prompts.tsx</code> / <code>Requests.tsx</code>：biz_type 下拉与过滤器加 <code>post</code>。</li>
+<li><code>Requests.tsx</code> 详情弹窗（<code>biz_type==='post'</code>）：① 缩略图网格（点开大图）+ caption；② 合并 verdict；③ <strong>标签表</strong> —— 6+1 类逐行 detected（红/绿标）+ confidence + evidence，零容忍命中高亮。</li>
+</ul>
+
+<h3 id="ch-docs">4.8 文档 / 启用</h3>
+<ul>
+<li><code>04-callback-spec.md</code>：补 <code>post</code> 枚举 + <code>labels</code> 定义；<code>02-api-public.md</code>：补 <code>image_urls</code> 入参与 <code>result.labels</code>。</li>
+<li><code>同趣-integration.md</code>：补 post 调用示例。</li>
+<li><b>启用（数据操作）：</b><code>PATCH /admin/apps/app_79e81a7183747039</code>，<code>biz_types</code> 追加 <code>"post"</code>（保留原四类，复用现有 secret）。</li>
+</ul>
+
+<h2 id="edge">5. 边界与约定（v1）</h2>
+<ul>
+<li><b>不可达 / 非图 URL：</b>v1 不做服务端可达性预检 —— 格式 + 数量 + https 校验通过即送 Grok；取不到图 → <code>PROVIDER_ERROR</code> → <code>status=error</code>。后续如需 <code>unsupported_content</code> 细分再迭代。</li>
+<li><b>单图 ≤8MB：</b>同趣侧已压成 WebP w≤768，ai-guard 不强校验大小。</li>
+<li><b>多图 sync 偏慢：</b>默认 <code>SYNC_TIMEOUT_MS=10000</code>；如常超时，上调 post 超时或引导用 <code>mode=auto</code> 降级。先用默认，观测后再调。</li>
+</ul>
+
+<h2 id="verify">6. 验证方案</h2>
+<ul class="checklist">
+<li>✅ <code>pnpm -s typecheck &amp;&amp; pnpm -s test</code>（铁律 6）。</li>
+<li>✅ 单测：schema（image_urls / content 约束）、dedup（含图改 hash，<span class="ok">现有四类 hash 不变</span>）、grok/pipeline（多图选 vision + labels 透传）、prefilter（post 跳 L1 留 L2）。</li>
+<li>✅ e2e：post（2~3 图）sync 拿到合并 verdict + 6+1 类 labels；含违规图 → reject + 对应 label detected + evidence；疑似未成年面孔 → <code>minor_face</code> detected + review/reject。</li>
+<li>✅ 冒烟：<code>--env dev</code> 起 worker，HMAC 调 <code>/v1/moderate</code>（<code>test-post-*</code>）；验异步回调 <code>biz_type='post'</code>、签名通过、<code>extra</code> 原样回传。</li>
+<li>✅ 后台：dev 过滤 post、详情弹窗见缩略图 + 标签表。</li>
+<li>✅ 部署：先 <code>--env dev</code> 跑迁移 + 冒烟，再上 prod（铁律 6/7，走 deploy-worker skill）。</li>
+</ul>
+
+<h2 id="files">7. 受影响文件</h2>
+<table>
+<tr><th>层</th><th>文件</th></tr>
+<tr><td>契约 / 管线</td><td><code>moderation/{schema,dedup,pipeline,prefilter,types}.ts</code></td></tr>
+<tr><td>Provider</td><td><code>providers/{router,grok}.ts</code></td></tr>
+<tr><td>路由 / 异步 / 回调</td><td><code>routes/moderate.ts</code>、<code>index.ts</code>、<code>db/queries.ts</code>、<code>routes/admin-stats.ts</code>、<code>callback/dispatcher.ts</code></td></tr>
+<tr><td>迁移</td><td><code>migrations/00XX_seed_post_prompt.sql</code>（+ image_urls / labels 列）</td></tr>
+<tr><td>后台</td><td><code>admin-ui/src/lib/api.ts</code>、<code>pages/{Apps,Prompts,Requests}.tsx</code></td></tr>
+<tr><td>文档</td><td><code>docs/{04-callback-spec,02-api-public}.md</code>、<code>docs/apps/同趣-integration.md</code></td></tr>
+</table>
+
+<p class="legend" style="margin-top:40px">本方案对应计划文件：<code>~/.claude/plans/c-code-ai-docs-apps-html-1-modular-candle.md</code> · 设计已定稿，尚未开发。</p>
+</main>
+</body>
+</html>

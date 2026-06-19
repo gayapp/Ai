@@ -1,13 +1,14 @@
 import { createGrokAdapter } from "./grok.ts";
-import { createGeminiAdapter } from "./gemini.ts";
+import { AppError, ErrorCodes } from "../lib/errors.ts";
 import type { AnalyzeBizType, AnalyzeProvider } from "../analyze/types.ts";
 import type { BizType, Provider } from "../moderation/schema.ts";
 import type { ProviderStrategy } from "../moderation/types.ts";
 
 export interface ProviderCallArgs {
   systemPrompt: string;
-  content: string; // text or image URL
+  content: string; // text or (avatar) single image URL
   isImage: boolean;
+  imageUrls?: string[]; // post 多图/视频帧；非空时走 vision，文字放 content
   timeoutMs: number;
 }
 
@@ -33,6 +34,7 @@ const DEFAULT_ROUTE: Record<BizType, { primary: Provider; fallback: Provider | n
   nickname: { primary: "grok", fallback: null },
   bio: { primary: "grok", fallback: null },
   avatar: { primary: "grok", fallback: null }, // grok-4 vision，需 GROK_VISION_MODEL（默认 grok-4）
+  post: { primary: "grok", fallback: null }, // 社区帖：纯文字走文本模型，带图走 grok-4 vision（按请求动态）
 };
 
 export interface AnalyzeRoute {
@@ -76,6 +78,13 @@ export function getAdapter(env: Env, provider: Provider): ProviderAdapter {
     case "grok":
       return createGrokAdapter(env);
     case "gemini":
-      return createGeminiAdapter(env);
+      // 2026-06-04 起 gemini 全平台下线（见 ai2ai.md）。Provider enum 保留以兼容
+      //   历史 moderation_requests 行；但 router 不再路由到 gemini，所以 getAdapter
+      //   也不应被请求 gemini。若被请求，明确抛错而非静默退化。
+      throw new AppError(
+        ErrorCodes.PROVIDER_ERROR,
+        500,
+        "gemini provider has been retired; route should not reach this adapter",
+      );
   }
 }

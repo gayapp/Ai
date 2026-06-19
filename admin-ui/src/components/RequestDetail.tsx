@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
-import { Stats, evidenceUrl, type ModerationDetail, type ReplayResult } from "../lib/api";
+import { Stats, evidenceUrl, type ModerationDetail, type ModerationLabel, type ReplayResult } from "../lib/api";
 import { ProviderPill, RiskPill, StatusPill } from "./common";
+
+// 6 类零容忍 + minor_face(复核) + nsfw(描述性)
+const ZERO_TOLERANCE = new Set(["csam", "ad", "drug", "gambling", "politics"]);
 
 export default function RequestDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const [row, setRow] = useState<ModerationDetail | null>(null);
@@ -42,6 +45,9 @@ export default function RequestDetail({ id, onClose }: { id: string; onClose: ()
 
                 {/* CONTENT — 用户原文 / 图片 */}
                 <ContentBlock row={row} />
+
+                {/* 结构化标签（post） */}
+                {row.labels && row.labels.length > 0 && <LabelsTable labels={row.labels} />}
 
                 {/* 元信息 */}
                 <h3 style={{ marginTop: 22 }}>元信息</h3>
@@ -110,15 +116,36 @@ export default function RequestDetail({ id, onClose }: { id: string; onClose: ()
 }
 
 function ContentBlock({ row }: { row: ModerationDetail }) {
-  if (!row.content_text) {
+  if (row.biz_type === "post" && row.image_urls && row.image_urls.length > 0) {
     return (
       <div className="card">
-        <h3 style={{ margin: 0, marginBottom: 6 }}>原文</h3>
-        <p className="muted">此记录早于 migration 0003，未存内容</p>
+        <h3 style={{ margin: 0, marginBottom: 6 }}>
+          帖子图片 / 视频帧 <span className="muted" style={{ fontSize: 12 }}>{row.image_urls.length} 张</span>
+        </h3>
+        {row.content_text && (
+          <div className="wrap" style={{ padding: "8px 12px", background: "var(--panel-2)", borderRadius: 6, border: "1px solid var(--border)", fontSize: 14, lineHeight: 1.6, marginBottom: 10 }}>
+            {row.content_text}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {row.image_urls.map((url, i) => (
+            <a key={i} href={url} target="_blank" rel="noreferrer" title={`第 ${i + 1} 张`}
+               style={{ position: "relative", display: "block" }}>
+              <img
+                src={url}
+                alt={`frame ${i + 1}`}
+                style={{ width: 150, height: 150, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)", display: "block" }}
+                onError={(e) => { (e.currentTarget.style.opacity = "0.25"); }}
+              />
+              <span style={{ position: "absolute", left: 4, top: 4, background: "rgba(0,0,0,.6)", color: "#fff", fontSize: 11, padding: "1px 6px", borderRadius: 4 }}>{i + 1}</span>
+            </a>
+          ))}
+        </div>
       </div>
     );
   }
-  if (row.biz_type === "avatar") {
+  if (row.biz_type === "avatar" && row.content_text) {
+    const avatarUrl = row.content_text;
     return (
       <div className="card">
         <h3 style={{ margin: 0, marginBottom: 6 }}>图片</h3>
@@ -126,13 +153,13 @@ function ContentBlock({ row }: { row: ModerationDetail }) {
           <div>
             <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>原始 URL（可能已失效）</div>
             <img
-              src={row.content_text}
+              src={avatarUrl}
               alt="avatar source"
               style={{ maxWidth: 280, maxHeight: 280, borderRadius: 6, border: "1px solid var(--border)", display: "block" }}
               onError={(e) => { (e.currentTarget.style.display = "none"); }}
             />
             <a className="monospace" style={{ fontSize: 11, wordBreak: "break-all", display: "block", marginTop: 6, maxWidth: 320 }}
-               href={row.content_text} target="_blank" rel="noreferrer">{row.content_text}</a>
+               href={avatarUrl} target="_blank" rel="noreferrer">{avatarUrl}</a>
           </div>
           {row.evidence_key && (
             <div>
@@ -149,6 +176,14 @@ function ContentBlock({ row }: { row: ModerationDetail }) {
       </div>
     );
   }
+  if (!row.content_text) {
+    return (
+      <div className="card">
+        <h3 style={{ margin: 0, marginBottom: 6 }}>原文</h3>
+        <p className="muted">此记录早于 migration 0003，未存内容</p>
+      </div>
+    );
+  }
   return (
     <div className="card">
       <h3 style={{ margin: 0, marginBottom: 6 }}>原文 <span className="muted" style={{ fontSize: 12 }}>{row.content_text.length} 字</span></h3>
@@ -156,6 +191,44 @@ function ContentBlock({ row }: { row: ModerationDetail }) {
         {row.content_text}
       </div>
     </div>
+  );
+}
+
+function LabelsTable({ labels }: { labels: ModerationLabel[] }) {
+  return (
+    <>
+      <h3 style={{ marginTop: 22 }}>结构化标签</h3>
+      <table className="data" style={{ width: "100%", fontSize: 13 }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: "left" }}>category</th>
+            <th style={{ textAlign: "left" }}>detected</th>
+            <th style={{ textAlign: "left" }}>confidence</th>
+            <th style={{ textAlign: "left" }}>evidence（是什么）</th>
+          </tr>
+        </thead>
+        <tbody>
+          {labels.map((l) => {
+            const hit = l.detected && ZERO_TOLERANCE.has(l.category);
+            return (
+              <tr key={l.category} style={hit ? { background: "rgba(220,38,38,.12)" } : undefined}>
+                <td>
+                  <code>{l.category}</code>
+                  {ZERO_TOLERANCE.has(l.category) && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>零容忍</span>}
+                  {l.category === "minor_face" && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>复核</span>}
+                  {l.category === "nsfw" && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>描述性</span>}
+                </td>
+                <td style={{ color: l.detected ? (hit ? "var(--danger, #dc2626)" : "var(--warn, #d97706)") : "var(--ok, #16a34a)", fontWeight: 600 }}>
+                  {l.detected ? "✓ 是" : "—"}
+                </td>
+                <td>{l.detected ? l.confidence.toFixed(2) : "—"}</td>
+                <td className="wrap">{l.evidence || <span className="muted">—</span>}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </>
   );
 }
 

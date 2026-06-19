@@ -21,11 +21,8 @@ function makeEnv(): Env {
 describe("provider health Gemini sunset", () => {
   it("does not actively probe Gemini even when GEMINI_API_KEY is configured", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === "https://api.x.ai/v1/api-key") {
-        return new Response(
-          JSON.stringify({ team_blocked: false, api_key_blocked: false, api_key_disabled: false }),
-          { status: 200 },
-        );
+      if (url === "https://api.x.ai/v1/models") {
+        return new Response(JSON.stringify({ data: [{ id: "grok-4-fast-non-reasoning" }] }), { status: 200 });
       }
       throw new Error(`unexpected fetch ${url}`);
     });

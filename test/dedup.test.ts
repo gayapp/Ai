@@ -26,4 +26,25 @@ describe("dedup", () => {
     const b = dedupKey("comment", "gemini", 5, "h");
     expect(a).not.toBe(b);
   });
+
+  // ---- post 多图：image_urls 并入 hash ----
+  it("post: image_urls change the hash", async () => {
+    const noImg = await computeContentHash("post", "标题");
+    const withImg = await computeContentHash("post", "标题", ["https://x/1.webp"]);
+    expect(noImg).not.toBe(withImg);
+  });
+
+  it("post: image_urls order is significant (video frame order)", async () => {
+    const ab = await computeContentHash("post", "t", ["https://x/a", "https://x/b"]);
+    const ba = await computeContentHash("post", "t", ["https://x/b", "https://x/a"]);
+    expect(ab).not.toBe(ba);
+  });
+
+  it("no-image hash is byte-identical to the legacy 3-arg form (no cache pollution)", async () => {
+    const legacy = await computeContentHash("comment", "abc");
+    const emptyImgs = await computeContentHash("comment", "abc", []);
+    const undefImgs = await computeContentHash("comment", "abc", undefined);
+    expect(emptyImgs).toBe(legacy);
+    expect(undefImgs).toBe(legacy);
+  });
 });

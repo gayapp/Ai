@@ -69,8 +69,24 @@ export async function api<T = unknown>(
 // Typed endpoints
 // =============================================================
 
-export type BizType = "comment" | "nickname" | "bio" | "avatar";
+export type BizType = "comment" | "nickname" | "bio" | "avatar" | "post";
 export type AnalyzeBizType = "media_analysis" | "media_intro";
+
+export type LabelCategory =
+  | "minor_face"
+  | "csam"
+  | "ad"
+  | "drug"
+  | "gambling"
+  | "politics"
+  | "nsfw";
+
+export interface ModerationLabel {
+  category: LabelCategory;
+  detected: boolean;
+  confidence: number;
+  evidence: string;
+}
 export type Provider = "grok" | "gemini" | "xai";
 export type Status = "pass" | "reject" | "review" | "error" | "pending";
 export type RiskLevel = "safe" | "low" | "medium" | "high";
@@ -119,6 +135,8 @@ export interface ModerationDetail extends ModerationRow {
   extra: Record<string, unknown> | null;
   callback_url: string | null;
   completed_at: string | null;
+  image_urls?: string[] | null; // post 多图/视频帧
+  labels?: ModerationLabel[] | null; // post 结构化标签
 }
 
 export interface ReplayResult {

@@ -7,6 +7,7 @@ import { moderateRouter } from "./routes/moderate.ts";
 import { analyzeRouter } from "./routes/analyze.ts";
 import { analyzeRecordsRouter } from "./routes/analyze-records.ts";
 import { adminAuditRouter } from "./routes/admin-audit.ts";
+import { adminAnalyzeBackpressureCanaryRouter } from "./routes/admin-analyze-backpressure-canary.ts";
 import { adminAppsRouter } from "./routes/admin-apps.ts";
 import { adminAnalyzeRecordsRouter } from "./routes/admin-analyze-records.ts";
 import { adminPromptRegressionRouter } from "./routes/admin-prompt-regression.ts";
@@ -29,12 +30,12 @@ import {
   setEvidenceKey,
 } from "./db/queries.ts";
 import { resolveRoute } from "./providers/router.ts";
-import { CachedResult } from "./moderation/schema.ts";
+import { CachedResult, requestIsImage } from "./moderation/schema.ts";
 import { processCallback, sweepAnalyzeCallbackDeliveries } from "./callback/dispatcher.ts";
 import { saveAvatarEvidence } from "./evidence/r2.ts";
 import { sweepModerationPending } from "./moderation/pending-sweep.ts";
 import { rollupYesterday } from "./stats/rollup.ts";
-import { PENDING_COUNT_KV_KEY } from "./analyze/backpressure.ts";
+import { PENDING_COUNT_KV_KEY, PENDING_COUNT_KV_TTL_SECONDS } from "./analyze/backpressure.ts";
 import { sweepAnalyzePending } from "./analyze/pending-sweep.ts";
 import { dispatchAnalyzeJob } from "./analyze/pipeline/dispatcher.ts";
 import type { AnalyzeJob } from "./analyze/types.ts";
@@ -87,6 +88,7 @@ app.route("/", moderateRouter);
 app.route("/", analyzeRouter);
 app.route("/", analyzeRecordsRouter);
 app.route("/admin/audit", adminAuditRouter);
+app.route("/admin/analyze-backpressure-canary", adminAnalyzeBackpressureCanaryRouter);
 app.route("/admin/apps", adminAppsRouter);
 app.route("/admin/analyze-records", adminAnalyzeRecordsRouter);
 app.route("/admin/prompt-regression", adminPromptRegressionRouter);
@@ -133,6 +135,7 @@ async function handleModerationQueue(
 
 async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
   const existing = await getModerationById(env.DB, job.request_id);
+  const imageUrls = job.image_urls ?? undefined;
   if (!existing) {
     await recordPending(env.DB, {
       id: job.request_id,
@@ -140,17 +143,19 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
       biz_type: job.biz_type,
       biz_id: job.biz_id,
       user_id: job.user_id,
-      content_hash: await computeContentHash(job.biz_type, job.content),
+      content_hash: await computeContentHash(job.biz_type, job.content, imageUrls),
       content_text: job.content,
       mode: "async",
       extra: job.extra ?? null,
       callback_url: job.callback_url,
       prefiltered_by: null,
+      image_urls: job.image_urls ?? null,
     });
   }
 
-  const isImage = job.biz_type === "avatar";
-  const contentHash = existing?.content_hash ?? await computeContentHash(job.biz_type, job.content);
+  const isImage = requestIsImage(job.biz_type, imageUrls);
+  const contentHash =
+    existing?.content_hash ?? (await computeContentHash(job.biz_type, job.content, imageUrls));
 
   // Load app config to honor provider strategy
   const app = await loadAppCached(env, job.app_id);
@@ -189,6 +194,7 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
       bizType: job.biz_type,
       content: job.content,
       isImage,
+      imageUrls,
       timeoutMs: Math.max(timeoutMs, 25_000), // give async a bit more
       strategy,
     });
@@ -206,6 +212,7 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
       output_tokens: result.output_tokens,
       latency_ms: result.latency_ms,
       error_code: result.error_code ?? null,
+      labels: result.labels ?? null,
     });
     if (kvKey && result.status !== "error") {
       const cacheable = CachedResult.parse({
@@ -216,6 +223,7 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
         provider: result.provider,
         model: result.model,
         prompt_version: result.prompt_version,
+        labels: result.labels,
       });
       const ttl = parseInt(env.DEDUP_TTL_SECONDS || "604800", 10);
       await putDedup(env.DEDUP_CACHE, kvKey, cacheable, ttl);
@@ -223,8 +231,9 @@ async function runAsyncModeration(env: Env, job: ModerationJob): Promise<void> {
     // R2 evidence 保存 — 方案 A 合规策略下默认关闭（env.SAVE_EVIDENCE !== "true"）
     //   关闭：平台不在自己 CF 账号下保存头像原图，规避 CSAM 合规风险
     //   启用：配合 Dashboard 里 R2 的 CSAM 扫描使用（见 docs/optimization/csam-scan-setup.md）
+    //   仅 avatar：saveAvatarEvidence 存的是单张头像 URL；post 多图/帧不走此路径。
     if (
-      isImage &&
+      job.biz_type === "avatar" &&
       !existing?.evidence_key &&
       result.status !== "error" &&
       env.SAVE_EVIDENCE === "true"
@@ -297,7 +306,7 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
   if (cron === "*/5 * * * *") {
     try {
       const r = await checkProviderHealth(env);
-      console.log("[scheduled] provider health:", JSON.stringify({ grok: r.grok.ok, gemini: r.gemini.ok, fired: r.fired }));
+      console.log("[scheduled] provider health:", JSON.stringify({ grok: r.grok.ok, grokReason: r.grok.reason, grokDetail: r.grok.detail, gemini: r.gemini.ok, fired: r.fired }));
     } catch (e) {
       console.warn("[scheduled] provider health failed", e);
     }
@@ -343,13 +352,15 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
     }
 
     // M3: pending pool count → NONCE KV，入口背压用。
-    //   每 5min 刷一次，避免每请求 SELECT COUNT(*) 拉延迟。expirationTtl 300s 与 cron 节奏对齐。
+    //   每 5min 刷一次，避免每请求 SELECT COUNT(*) 拉延迟。TTL 稍长于 cron 节奏，容忍调度抖动。
     try {
       const row = await env.DB.prepare(
         `SELECT COUNT(*) AS n FROM analyze_requests WHERE status = 'pending'`,
       ).first<{ n: number }>();
       const n = row?.n ?? 0;
-      await env.NONCE.put(PENDING_COUNT_KV_KEY, String(n), { expirationTtl: 300 });
+      await env.NONCE.put(PENDING_COUNT_KV_KEY, String(n), {
+        expirationTtl: PENDING_COUNT_KV_TTL_SECONDS,
+      });
       console.log(`[scheduled] analyze pending count = ${n}`);
     } catch (e) {
       console.warn("[scheduled] analyze pending count write failed", e);
@@ -358,19 +369,29 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
 
   // "5 0 * * *" — daily cleanup + rollup
   if (cron === "5 0 * * *") {
-    // Cleanup old records (90d retention). 每步独立 try/catch——D1 大表 DELETE
-    // 偶发 timeout/transient 不能把后续 rollup + heartbeat 一起拖死（事故 2026-05-31：
-    // stats_rollup 缺两天，怀疑就是 DELETE 抛错连带 rollup 没跑）。
-    const cutoff = Date.now() - 90 * 24 * 3600 * 1000;
+    // Cleanup old records. 每步独立 try/catch——D1 大表 DELETE 偶发 timeout/transient
+    // 不能把后续 rollup + heartbeat 一起拖死（事故 2026-05-31：stats_rollup 缺两天）。
+    //
+    // 保留策略（2026-06-15 起）：
+    // - moderation_requests / callback_deliveries：90d（运维排查需要较长窗口）
+    // - analyze_requests：60d（IRC 单日 9k-43k 条、avg 2.9KB/行，大字段拖 D1 增速 80MB/day）
+    //   IRC 业务侧持久任务表已自行保留，60d 足够 ai-guard 侧追溯
+    const cutoff90d = Date.now() - 90 * 24 * 3600 * 1000;
+    const cutoffAnalyze = Date.now() - 60 * 24 * 3600 * 1000;
     try {
-      await env.DB.prepare(`DELETE FROM moderation_requests WHERE created_at < ?`).bind(cutoff).run();
+      await env.DB.prepare(`DELETE FROM moderation_requests WHERE created_at < ?`).bind(cutoff90d).run();
     } catch (e) {
       console.warn("[scheduled] cleanup moderation_requests failed", e);
     }
     try {
-      await env.DB.prepare(`DELETE FROM callback_deliveries WHERE created_at < ?`).bind(cutoff).run();
+      await env.DB.prepare(`DELETE FROM callback_deliveries WHERE created_at < ?`).bind(cutoff90d).run();
     } catch (e) {
       console.warn("[scheduled] cleanup callback_deliveries failed", e);
+    }
+    try {
+      await env.DB.prepare(`DELETE FROM analyze_requests WHERE created_at < ?`).bind(cutoffAnalyze).run();
+    } catch (e) {
+      console.warn("[scheduled] cleanup analyze_requests failed", e);
     }
     // Aggregate yesterday into stats_rollup
     try {

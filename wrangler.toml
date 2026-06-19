@@ -168,6 +168,8 @@ GEMINI_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_RATE_LIMIT_QPS = "50"
 LOG_LEVEL = "debug"
 SAVE_EVIDENCE = "false"
+# dev 无真实流量，告警整体静默（避免失效测试 key 等反复刷 Telegram）。prod 不设此项 → 告警照常。
+ALERTS_DISABLED = "true"
 
 [env.dev.observability]
 enabled = true

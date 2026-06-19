@@ -5,39 +5,150 @@
  * 慢重投（见 docs/optimization/m3-rfc-pending-pool-backpressure.md）。
  *
  * pending count 不在每个请求查 D1（70k 行表 SELECT COUNT(*) ~50ms 拉延迟），
- * 而是 cron 每 5 分钟（star/5 ...）写 NONCE KV（TTL 5min），入口 read。容忍 5min 偏差。
+ * 而是 cron 每 5 分钟（star/5 ...）写 NONCE KV。入口优先 read KV；若 KV miss/坏值，
+ * 仅当次 fallback 查一次 D1 并回填，避免 cron 抖动时背压失效。
  *
- * Phase 1（canary）：hard_limit=2000，稳态 < 50 不会触发；等 IRC requeue 路径上 prod
- * 后 lower 到 final 500。详见 ai2ai.md。
+ * Phase 2：IRC requeue 路径已通过 controlled prod 503 acceptance，hard_limit 降到 final 500。
+ * 详见 ai2ai.md。
  */
 
 import type { Context } from "hono";
 
-/** Phase 1 canary 阈值。Phase 2 IRC requeue ready 后改为 500。 */
-export const BACKPRESSURE_HARD_LIMIT = 2000;
+/** Final M3 pending-pool hard limit after IRC requeue readiness. */
+export const BACKPRESSURE_HARD_LIMIT = 500;
 /** ≥ 60% 满载报 severity=warn 给 IRC（供其 Phase 2 主动降速参考） */
 export const BACKPRESSURE_WARN_PCT = 0.6;
 /** 503 响应里告诉 IRC 多久后重试（秒）。IRC 退回持久队列 + jitter 重投 */
 export const RETRY_AFTER_SECONDS = 30;
 /** cron 写、入口 read 的 KV key */
 export const PENDING_COUNT_KV_KEY = "kv:analyze:pending:count";
+/** Slightly longer than the 5min cron cadence so schedule jitter does not create KV gaps. */
+export const PENDING_COUNT_KV_TTL_SECONDS = 600;
+/** admin-only one-shot gate prefix for controlled IRC live 503 acceptance. */
+export const BACKPRESSURE_CANARY_KV_PREFIX = "kv:analyze:backpressure-canary:";
+export const BACKPRESSURE_CANARY_DEFAULT_TTL_SECONDS = 120;
+export const BACKPRESSURE_CANARY_MAX_TTL_SECONDS = 300;
 
 export type BacklogSeverity = "ok" | "warn" | "crit";
 
+export interface BackpressureCanaryGate {
+  app_id: string;
+  biz_type: string;
+  biz_id: string;
+  reason: string | null;
+  armed_by: string;
+  armed_at_ms: number;
+  expires_at_ms: number;
+}
+
+export interface ArmBackpressureCanaryInput {
+  appId: string;
+  bizType: string;
+  bizId: string;
+  ttlSeconds?: number;
+  reason?: string | null;
+  armedBy?: string | null;
+}
+
+export interface BackpressureMatchInput {
+  appId: string;
+  bizType: string;
+  bizId: string;
+}
+
 /**
  * 读 NONCE KV 缓存里的 pending 池规模。
- * - 缺失（cron 还没写过）或解析失败 → 返 0（保守视为健康，不拒）
- * - 这是防御：KV 故障不应直接阻断业务，最坏退化成"不背压"
+ * - KV 命中且合法 → 直接返回
+ * - KV 缺失/坏值/读取失败 → 查一次 D1 并回填 KV
+ * - D1 或 KV 都不可用 → 返 0（保守视为健康，不拒）
  */
 export async function getPendingCountCached(env: Env): Promise<number> {
   try {
     const raw = await env.NONCE.get(PENDING_COUNT_KV_KEY);
-    if (!raw) return 0;
-    const n = parseInt(raw, 10);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
+    if (raw) {
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+  } catch {
+    // Fall through to D1 refresh. If D1 or KV is also unavailable, refresh returns 0.
+  }
+  return refreshPendingCountCache(env);
+}
+
+export async function refreshPendingCountCache(env: Env): Promise<number> {
+  try {
+    const row = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM analyze_requests WHERE status = 'pending'`,
+    ).first<{ n: number }>();
+    const n = Math.max(0, Number(row?.n ?? 0) || 0);
+    await env.NONCE.put(PENDING_COUNT_KV_KEY, String(n), {
+      expirationTtl: PENDING_COUNT_KV_TTL_SECONDS,
+    });
+    return n;
   } catch {
     return 0;
   }
+}
+
+export function backpressureCanaryKey(appId: string): string {
+  return `${BACKPRESSURE_CANARY_KV_PREFIX}${appId}`;
+}
+
+export async function armBackpressureCanary(
+  env: Env,
+  input: ArmBackpressureCanaryInput,
+): Promise<BackpressureCanaryGate> {
+  const now = Date.now();
+  const ttlSeconds = clampCanaryTtl(input.ttlSeconds);
+  const gate: BackpressureCanaryGate = {
+    app_id: input.appId,
+    biz_type: input.bizType,
+    biz_id: input.bizId,
+    reason: input.reason?.trim() || null,
+    armed_by: input.armedBy?.trim() || "admin",
+    armed_at_ms: now,
+    expires_at_ms: now + ttlSeconds * 1000,
+  };
+  await env.NONCE.put(backpressureCanaryKey(input.appId), JSON.stringify(gate), {
+    expirationTtl: ttlSeconds,
+  });
+  return gate;
+}
+
+export async function getBackpressureCanary(
+  env: Env,
+  appId: string,
+): Promise<BackpressureCanaryGate | null> {
+  const key = backpressureCanaryKey(appId);
+  const raw = await env.NONCE.get(key);
+  if (!raw) return null;
+  const gate = parseBackpressureCanary(raw);
+  if (!gate || gate.expires_at_ms <= Date.now()) {
+    await env.NONCE.delete(key);
+    return null;
+  }
+  return gate;
+}
+
+export async function clearBackpressureCanary(env: Env, appId: string): Promise<void> {
+  await env.NONCE.delete(backpressureCanaryKey(appId));
+}
+
+async function consumeMatchingBackpressureCanary(
+  env: Env,
+  input: BackpressureMatchInput,
+): Promise<BackpressureCanaryGate | null> {
+  const gate = await getBackpressureCanary(env, input.appId);
+  if (!gate) return null;
+  if (
+    gate.app_id !== input.appId ||
+    gate.biz_type !== input.bizType ||
+    gate.biz_id !== input.bizId
+  ) {
+    return null;
+  }
+  await clearBackpressureCanary(env, input.appId);
+  return gate;
 }
 
 /**
@@ -65,12 +176,24 @@ export function getBacklogSeverity(
 export async function enforceBackpressure(
   c: Context<{ Bindings: Env }>,
   hardLimit: number = BACKPRESSURE_HARD_LIMIT,
+  matchInput?: BackpressureMatchInput,
 ): Promise<Response | null> {
   const count = await getPendingCountCached(c.env);
-  const severity = getBacklogSeverity(count, hardLimit);
+  let currentBacklog = count;
+  let severity = getBacklogSeverity(count, hardLimit);
+  let canaryGate: BackpressureCanaryGate | null = null;
 
-  c.header("X-Analyze-Backlog", String(count));
+  if (severity !== "crit" && matchInput) {
+    canaryGate = await consumeMatchingBackpressureCanary(c.env, matchInput);
+    if (canaryGate) {
+      currentBacklog = Math.max(count, hardLimit + 1);
+      severity = "crit";
+    }
+  }
+
+  c.header("X-Analyze-Backlog", String(currentBacklog));
   c.header("X-Analyze-Backlog-Severity", severity);
+  if (canaryGate) c.header("X-Analyze-Backpressure-Canary", "1");
 
   if (severity === "crit") {
     return c.json(
@@ -78,11 +201,47 @@ export async function enforceBackpressure(
         error_code: "backlog_overload",
         message: "analyze backlog exceeded; retry after the indicated seconds",
         retry_after_seconds: RETRY_AFTER_SECONDS,
-        current_backlog: count,
+        current_backlog: currentBacklog,
         hard_limit: hardLimit,
+        ...(canaryGate ? { canary: true } : {}),
       },
       503,
     );
   }
   return null;
+}
+
+function clampCanaryTtl(ttlSeconds: number | undefined): number {
+  if (!ttlSeconds) return BACKPRESSURE_CANARY_DEFAULT_TTL_SECONDS;
+  return Math.min(
+    BACKPRESSURE_CANARY_MAX_TTL_SECONDS,
+    Math.max(1, Math.floor(ttlSeconds)),
+  );
+}
+
+function parseBackpressureCanary(raw: string): BackpressureCanaryGate | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<BackpressureCanaryGate>;
+    if (
+      typeof parsed.app_id !== "string" ||
+      typeof parsed.biz_type !== "string" ||
+      typeof parsed.biz_id !== "string" ||
+      typeof parsed.armed_by !== "string" ||
+      typeof parsed.armed_at_ms !== "number" ||
+      typeof parsed.expires_at_ms !== "number"
+    ) {
+      return null;
+    }
+    return {
+      app_id: parsed.app_id,
+      biz_type: parsed.biz_type,
+      biz_id: parsed.biz_id,
+      reason: typeof parsed.reason === "string" ? parsed.reason : null,
+      armed_by: parsed.armed_by,
+      armed_at_ms: parsed.armed_at_ms,
+      expires_at_ms: parsed.expires_at_ms,
+    };
+  } catch {
+    return null;
+  }
 }

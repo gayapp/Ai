@@ -55,13 +55,18 @@ function sign(secret, body) {
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `biz_type` | string | ✓ | `comment` / `nickname` / `bio` / `avatar` |
+| `biz_type` | string | ✓ | `comment` / `nickname` / `bio` / `avatar` / `post` |
 | `biz_id` | string | ✓ | 应用侧业务 ID，回调原样带回。长度 ≤ 128 |
-| `content` | string | ✓ | 文本内容（≤ 8KB）或图片 URL（`https://` 起） |
+| `content` | string | 见说明 | 文本内容（≤ 16KB）或图片 URL（`https://` 起）。非 `post` 必填；`post` 与 `image_urls` 至少其一非空 |
+| `image_urls` | string[] | `post` 专用 | **仅 `biz_type=post`**：多图/视频帧 URL 数组，每个 `https://` 起，≤ 12 张、单图 ≤ 8MB。整组综合出一个 verdict |
 | `user_id` | string |  | 终端用户 ID，用于滥用统计 |
 | `mode` | enum |  | `sync` / `async` / `auto`（默认） |
 | `callback_url` | string |  | 覆盖应用默认回调地址。仅 async 或降级时使用 |
-| `extra` | object |  | ≤ 4KB，回调原样回传 |
+| `extra` | object |  | ≤ 4KB，回调原样回传（如 `{ "post_type": "video" }`） |
+
+> `post` 的视觉模型按请求是否带图动态选择：无图（纯文字帖）走文本模型，带图（图文/视频帧帖）走视觉模型，多图一次性送入。`post` 在 `mode=auto` 下先尝试同步，超时再降级异步 + 回调。
+>
+> `post` 的同步响应 `result` 额外含 `labels`（逐类 `minor_face/csam/ad/drug/gambling/politics/nsfw` 的 `detected + evidence`），字段定义见 [04-callback-spec.md](04-callback-spec.md#labels-取值仅-biz_typepost)。
 
 ### 响应模式
 
@@ -122,7 +127,7 @@ function sign(secret, body) {
 
 ## `GET /v1/moderate/{request_id}` — 查询结果
 
-用于幂等复查（例如应用侧回调接收失败后重新拉取）。
+用于幂等复查（例如应用侧回调接收失败后重新拉取）。`result` 含与回调一致的字段，`post` 请求会带 `result.labels`（逐类结构化标签）。
 
 **Headers**：同上，对空 body 签名即可。
 

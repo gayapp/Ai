@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Prompts, type PromptRow } from "../lib/api";
 
-const MODERATE_BIZ = ["comment", "nickname", "bio", "avatar"];
+const MODERATE_BIZ = ["comment", "nickname", "bio", "avatar", "post"];
 const ANALYZE_BIZ = ["media_analysis", "media_intro"];
 const MODERATE_PROVIDERS = ["grok", "gemini"];
 const ANALYZE_PROVIDERS = ["xai", "gemini"];

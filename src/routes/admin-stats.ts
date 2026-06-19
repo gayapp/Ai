@@ -9,6 +9,12 @@ import {
   topUsers,
 } from "../db/queries.ts";
 import {
+  BACKPRESSURE_HARD_LIMIT,
+  BACKPRESSURE_WARN_PCT,
+  PENDING_COUNT_KV_KEY,
+  getBacklogSeverity,
+} from "../analyze/backpressure.ts";
+import {
   loadAnalyzeGrayMetricRows,
   summarizeAnalyzeBacklog,
   summarizeAnalyzeRequests,
@@ -158,6 +164,37 @@ adminStatsRouter.get("/analyze-backlog", async (c) => {
   });
 });
 
+adminStatsRouter.get("/analyze-backpressure", async (c) => {
+  const raw = await readPendingPoolKv(c.env);
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM analyze_requests WHERE status = 'pending'`,
+  ).first<{ n: number }>();
+  const actualCount = Math.max(0, Number(row?.n ?? 0) || 0);
+  const cachedCount = parsePendingPoolCount(raw.value);
+  const warnThreshold = Math.floor(BACKPRESSURE_HARD_LIMIT * BACKPRESSURE_WARN_PCT);
+
+  return c.json({
+    generated_at: new Date().toISOString(),
+    hard_limit: BACKPRESSURE_HARD_LIMIT,
+    warn_threshold: warnThreshold,
+    kv: {
+      key: PENDING_COUNT_KV_KEY,
+      state: raw.state,
+      cached_count: cachedCount,
+      raw_value: raw.state === "hit" ? raw.value : null,
+    },
+    actual: {
+      pending_count: actualCount,
+      severity: getBacklogSeverity(actualCount),
+    },
+    effective: {
+      pending_count: cachedCount ?? actualCount,
+      severity: getBacklogSeverity(cachedCount ?? actualCount),
+      source: cachedCount === null ? "actual_fallback" : "kv",
+    },
+  });
+});
+
 adminStatsRouter.get("/analyze-gray", async (c) => {
   const { from_ms, to_ms } = resolveRange(c);
   const app_id = c.req.query("app_id") ?? undefined;
@@ -284,6 +321,27 @@ adminStatsRouter.get("/requests", async (c) => {
   });
 });
 
+async function readPendingPoolKv(env: Env): Promise<{
+  state: "hit" | "miss" | "malformed" | "error";
+  value: string | null;
+}> {
+  try {
+    const raw = await env.NONCE.get(PENDING_COUNT_KV_KEY);
+    if (!raw) return { state: "miss", value: null };
+    return parsePendingPoolCount(raw) === null
+      ? { state: "malformed", value: raw }
+      : { state: "hit", value: raw };
+  } catch {
+    return { state: "error", value: null };
+  }
+}
+
+function parsePendingPoolCount(raw: string | null): number | null {
+  if (!raw) return null;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 function parseAdminModerationStatus(raw: string): Status | "pending" {
   if (raw === "pending") return "pending";
   return Status.parse(raw);
@@ -312,6 +370,8 @@ adminStatsRouter.get("/requests/:id", async (c) => {
     risk_level: row.risk_level,
     categories: row.categories ? JSON.parse(row.categories) : [],
     reason: row.reason,
+    image_urls: row.image_urls ? JSON.parse(row.image_urls) : null, // post 多图查看
+    labels: row.labels ? JSON.parse(row.labels) : null, // post 结构化标签
     tokens: { input: row.input_tokens ?? 0, output: row.output_tokens ?? 0 },
     latency_ms: row.latency_ms ?? 0,
     error_code: row.error_code,

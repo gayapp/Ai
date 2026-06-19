@@ -1,5 +1,5 @@
 import type { AppConfig, DeliveryMode, ProviderStrategy } from "../moderation/types.ts";
-import type { BizType, Provider, Status } from "../moderation/schema.ts";
+import type { BizType, ModerationLabel, Provider, Status } from "../moderation/schema.ts";
 
 // =============================================================
 // apps
@@ -266,6 +266,8 @@ export interface ModerationRow {
   error_code: string | null;
   extra: string | null;
   callback_url: string | null;
+  image_urls: string | null; // post 多图 URL（JSON 数组），后台多图查看用
+  labels: string | null; // post 结构化标签（JSON 数组）
   created_at: number;
   completed_at: number | null;
 }
@@ -282,14 +284,15 @@ export interface RecordPendingArgs {
   extra: Record<string, unknown> | null;
   callback_url: string | null;
   prefiltered_by?: string | null;
+  image_urls?: string[] | null;
 }
 
 export async function recordPending(db: D1Database, a: RecordPendingArgs): Promise<void> {
   await db
     .prepare(
       `INSERT INTO moderation_requests
-       (id, app_id, biz_type, biz_id, user_id, content_hash, content_text, mode, status, extra, callback_url, prefiltered_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+       (id, app_id, biz_type, biz_id, user_id, content_hash, content_text, mode, status, extra, callback_url, prefiltered_by, image_urls, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
     )
     .bind(
       a.id,
@@ -303,6 +306,7 @@ export async function recordPending(db: D1Database, a: RecordPendingArgs): Promi
       a.extra ? JSON.stringify(a.extra) : null,
       a.callback_url,
       a.prefiltered_by ?? null,
+      a.image_urls && a.image_urls.length ? JSON.stringify(a.image_urls) : null,
       Date.now(),
     )
     .run();
@@ -326,6 +330,7 @@ export interface RecordCompletedArgs {
   output_tokens: number;
   latency_ms: number;
   error_code: string | null;
+  labels?: ModerationLabel[] | null;
 }
 
 export async function recordCompleted(db: D1Database, a: RecordCompletedArgs): Promise<void> {
@@ -335,7 +340,7 @@ export async function recordCompleted(db: D1Database, a: RecordCompletedArgs): P
          cached = ?, status = ?, risk_level = ?, categories = ?, reason = ?,
          provider = ?, model = ?, prompt_version = ?,
          input_tokens = ?, output_tokens = ?, latency_ms = ?,
-         error_code = ?, completed_at = ?
+         error_code = ?, labels = ?, completed_at = ?
        WHERE id = ?`,
     )
     .bind(
@@ -351,6 +356,7 @@ export async function recordCompleted(db: D1Database, a: RecordCompletedArgs): P
       a.output_tokens,
       a.latency_ms,
       a.error_code,
+      a.labels && a.labels.length ? JSON.stringify(a.labels) : null,
       Date.now(),
       a.id,
     )
