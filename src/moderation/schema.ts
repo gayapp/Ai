@@ -39,6 +39,7 @@ export const LabelCategory = z.enum([
   "drug", // 毒品 → 零容忍
   "gambling", // 赌博 → 零容忍
   "politics", // 政治敏感 → 零容忍
+  "id_document", // 身份证/护照/证件等可证明身份的图片 → 零容忍（隐私/合规）
   "nsfw", // 合法成人内容(描述性,不影响判定)
 ]);
 export type LabelCategory = z.infer<typeof LabelCategory>;

@@ -79,6 +79,7 @@ export type LabelCategory =
   | "drug"
   | "gambling"
   | "politics"
+  | "id_document"
   | "nsfw";
 
 export interface ModerationLabel {

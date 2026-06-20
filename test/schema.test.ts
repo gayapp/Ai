@@ -132,7 +132,10 @@ describe("schema: post (multi-image)", () => {
       risk_level: "high",
       categories: ["ad"],
       reason: "x",
-      labels: [{ category: "ad", detected: true, confidence: 0.9, evidence: "微信号" }],
+      labels: [
+        { category: "ad", detected: true, confidence: 0.9, evidence: "微信号" },
+        { category: "id_document", detected: true, confidence: 0.95, evidence: "第1张图见到身份证" },
+      ],
     });
     expect(r.success).toBe(true);
   });
