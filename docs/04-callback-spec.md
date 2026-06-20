@@ -77,12 +77,13 @@ X-Request-Id: <request_id>
 
 | 子字段 | 类型 | 说明 |
 |--------|------|------|
-| `category` | enum | `minor_face \| csam \| ad \| drug \| gambling \| politics \| nsfw` |
+| `category` | enum | `minor_face \| csam \| ad \| drug \| gambling \| politics \| id_document \| nsfw` |
 | `detected` | boolean | 是否检出该类内容 |
 | `confidence` | number | 0~1 置信度 |
 | `evidence` | string | ≤512，"是什么"——命中位置/描述，未命中为空串 |
 
-- 6 类零容忍（`csam/ad/drug/gambling/politics` + `minor_face` 触发复核）驱动 `status`；`nsfw` 为合法成人内容，仅描述、不影响判定。
+- 零容忍类（`csam/ad/drug/gambling/politics/id_document` + `minor_face` 触发复核）驱动 `status`；`nsfw` 为合法成人内容，仅描述、不影响判定。
+- `id_document`：身份证 / 护照 / 证件等可证明身份的图片，零容忍 → `reject`（隐私/合规）。
 - 该字段只增不删；纯文字帖（无图）可能不含 `labels`。
 
 ### `provider` 字段语义（NULL 的合法场景）

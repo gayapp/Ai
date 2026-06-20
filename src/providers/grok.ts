@@ -11,8 +11,8 @@ const STRUCTURE_SUFFIX =
 const POST_STRUCTURE_SUFFIX =
   `这是社区帖子（标题/正文 + 多张图片或视频抽帧），请综合全部文字与图片给出一个整体结论。\n` +
   `请严格以 JSON 返回：{"status":"pass|reject|review","risk_level":"safe|low|medium|high","categories":["politics"|"porn"|"abuse"|"ad"|"spam"|"violence"|"other"],"reason":"简短中文原因",` +
-  `"labels":[{"category":"minor_face|csam|ad|drug|gambling|politics|nsfw","detected":true|false,"confidence":0~1,"evidence":"中文说明命中位置/是什么，未命中留空"}]}\n` +
-  `labels 必须覆盖全部 7 个 category 各一条。`;
+  `"labels":[{"category":"minor_face|csam|ad|drug|gambling|politics|id_document|nsfw","detected":true|false,"confidence":0~1,"evidence":"中文说明命中位置/是什么，未命中留空"}]}\n` +
+  `labels 必须覆盖全部 8 个 category 各一条。`;
 
 export function createGrokAdapter(env: Env): ProviderAdapter {
   return {

@@ -159,10 +159,12 @@ X-Signature    = hex(hmac_sha256(secret, string_to_sign))
 | `drug` | 毒品 | detected → `reject`（零容忍） |
 | `gambling` | 赌博 | detected → `reject`（零容忍） |
 | `politics` | 政治敏感 | detected → `reject`（零容忍） |
+| `id_document` | 身份证/护照/证件等可证明身份的图片 | detected → `reject`（零容忍，隐私/合规） |
 | `nsfw` | 合法成人内容（裸露/男同色情） | 仅描述，**detected=true 不影响判定** |
 
 - `confidence` 为 0~1；`evidence` 为命中位置/描述（未命中为空串）。
 - 同趣可直接用 `labels` 做精细化处置（如仅 `minor_face` 命中转人工、`ad` 命中扣分）。
+- `labels` 共 **8** 类（含 `id_document`）；`ad` 含二维码与引流性账号水印。
 
 ---
 

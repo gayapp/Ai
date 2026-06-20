@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { Stats, evidenceUrl, type ModerationDetail, type ModerationLabel, type ReplayResult } from "../lib/api";
 import { ProviderPill, RiskPill, StatusPill } from "./common";
 
-// 6 类零容忍 + minor_face(复核) + nsfw(描述性)
-const ZERO_TOLERANCE = new Set(["csam", "ad", "drug", "gambling", "politics"]);
+// 零容忍类 + minor_face(复核) + nsfw(描述性)
+const ZERO_TOLERANCE = new Set(["csam", "ad", "drug", "gambling", "politics", "id_document"]);
 
 export default function RequestDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const [row, setRow] = useState<ModerationDetail | null>(null);
