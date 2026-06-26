@@ -48,44 +48,45 @@ curl -X POST https://aicenter-api.1.gay/admin/alerts/check \
   -H "authorization: Bearer $ADMIN_TOKEN"
 ```
 
-## Dev e2e 冒烟测试账号
+## e2e 冒烟测试（prod 临时账号）
 
-**仅 dev 环境**的常驻测试 app，供签名 e2e 冒烟用。secret 仅在 dev 有效（dev 是无真实用户/PII 的弃用环境，故可入档）；**prod 严禁复用此 secret**。
-
-| 字段 | 值 |
-|------|-----|
-| `APP_ID` | `app_e2e_smoketest` |
-| `SECRET` | `35d500c11b50be38537f0413b91b26d19d6ee3e0f4040e19541c4569abdafda5` |
-| biz_types | `comment, nickname, bio` |
-| 环境 | dev only（`ai-guard-dev` D1） |
-
-跑一次签名请求（`scripts/smoke.sh` 用文件签名，规避 CJK 转义问题）：
+> dev 环境已弃用（2026-06 起直接在 prod 开发/测试）。e2e 冒烟一律走 **prod 临时账号：建号 → 测 → 删**，不留常驻凭据。
+> 原理：`apps.secret` 是明文 HMAC 密钥（[src/auth/hmac.ts](../src/auth/hmac.ts) 直接拿它当 key），所以**不需要 ADMIN_TOKEN**，直插 D1 即可签名。app KV 缓存 TTL 300s。
 
 ```bash
-export APP_ID=app_e2e_smoketest
-export SECRET=35d500c11b50be38537f0413b91b26d19d6ee3e0f4040e19541c4569abdafda5
-export BASE=https://ai-guard-dev.schetkovvlad.workers.dev
+export CLOUDFLARE_API_TOKEN=<cf token>; export CLOUDFLARE_ACCOUNT_ID=81541697879f371ae0cf2ca2912d4cab
+APP_ID=app_e2e_tmp; SECRET=$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')
 
-# 广告引流（汉字数字 QQ）→ 期望 prefiltered_by=ad:cn_numeral_contact, status=reject
-MODE=sync bash scripts/smoke.sh comment t1 "扣。三十四亿一千零四十三万七千四百八十九"
-# 正常评论 → 走模型（dev grok key 为占位 key，会返回 provider_auth_failed，属预期）
-MODE=sync bash scripts/smoke.sh comment t2 "这个电影真不错"
-```
-
-若账号丢失，重建：
-
-```bash
-wrangler d1 execute ai-guard-dev --remote --file=- <<'SQL'
+# 1) 建临时号（prod apps 表列齐全）
+wrangler d1 execute ai-guard --remote --file=- <<SQL
 INSERT OR REPLACE INTO apps
- (id, name, secret, callback_url, biz_types, rate_limit_qps, disabled, provider_strategy, created_at)
-VALUES
- ('app_e2e_smoketest', 'e2e-smoketest (dev only)',
-  '35d500c11b50be38537f0413b91b26d19d6ee3e0f4040e19541c4569abdafda5', NULL,
-  '["comment","nickname","bio"]', 50, 0, 'auto', strftime('%s','now')*1000);
+ (id,name,secret,callback_url,biz_types,analyze_biz_types,delivery_mode,
+  callback_max_concurrency,rate_limit_qps,disabled,provider_strategy,created_at)
+VALUES ('$APP_ID','e2e-tmp DELETE-ME','$SECRET',NULL,'["comment"]','[]','both',10,50,0,'auto',strftime('%s','now')*1000);
 SQL
+
+# 2) 签名请求（scripts/smoke.sh 用文件签名，规避 CJK 转义）
+export APP_ID SECRET; export BASE=https://ai-guard.schetkovvlad.workers.dev
+# 广告引流（汉字数字 QQ）→ 期望 prefiltered_by=ad:cn_numeral_contact, status=reject（前置正则，不打模型）
+MODE=sync bash scripts/smoke.sh comment t1 "扣。三十四亿一千零四十三万七千四百八十九"
+# 正常评论 → 走 grok 模型，消耗真实 token
+MODE=sync bash scripts/smoke.sh comment t2 "这个电影真不错"
+
+# 3) 删号（KV 缓存 300s 内自动过期）
+wrangler d1 execute ai-guard --remote --command "DELETE FROM apps WHERE id='$APP_ID';"
 ```
 
-> 注：dev 的 `apps` 表落后 prod（缺 `analyze_biz_types/delivery_mode/callback_max_concurrency` 列，migration 0007 未在 dev 应用）。上面 INSERT 故意只用 dev 现有列；代码读取时这些缺列走默认值。prod 做 e2e 请临时建号、测完即删，不要常驻。
+### Prompt 干跑（dry-run，需 ADMIN_TOKEN）
+
+改 prompt 前用 `/admin/prompts/dry-run` 把候选 prompt 跑真实模型（comment 全平台只路由 grok，gemini 已下线）：
+
+```bash
+curl -sX POST https://ai-guard.schetkovvlad.workers.dev/admin/prompts/dry-run \
+  -H "authorization: Bearer $ADMIN_TOKEN" -H "content-type: application/json" \
+  -d '{"biz_type":"comment","provider":"grok","content":"<候选 prompt 原文>","samples":["扣。三十四亿一千零四十三万七千四百八十九","1 求约 183/75","这个电影真不错"]}'
+```
+
+每条样本核对 `schema_ok=true` + `parsed.status/categories` 是否符合预期。详见 `.claude/skills/tune-prompt/`。
 
 ## 应急场景
 
