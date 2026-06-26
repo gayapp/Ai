@@ -48,6 +48,45 @@ curl -X POST https://aicenter-api.1.gay/admin/alerts/check \
   -H "authorization: Bearer $ADMIN_TOKEN"
 ```
 
+## Dev e2e 冒烟测试账号
+
+**仅 dev 环境**的常驻测试 app，供签名 e2e 冒烟用。secret 仅在 dev 有效（dev 是无真实用户/PII 的弃用环境，故可入档）；**prod 严禁复用此 secret**。
+
+| 字段 | 值 |
+|------|-----|
+| `APP_ID` | `app_e2e_smoketest` |
+| `SECRET` | `35d500c11b50be38537f0413b91b26d19d6ee3e0f4040e19541c4569abdafda5` |
+| biz_types | `comment, nickname, bio` |
+| 环境 | dev only（`ai-guard-dev` D1） |
+
+跑一次签名请求（`scripts/smoke.sh` 用文件签名，规避 CJK 转义问题）：
+
+```bash
+export APP_ID=app_e2e_smoketest
+export SECRET=35d500c11b50be38537f0413b91b26d19d6ee3e0f4040e19541c4569abdafda5
+export BASE=https://ai-guard-dev.schetkovvlad.workers.dev
+
+# 广告引流（汉字数字 QQ）→ 期望 prefiltered_by=ad:cn_numeral_contact, status=reject
+MODE=sync bash scripts/smoke.sh comment t1 "扣。三十四亿一千零四十三万七千四百八十九"
+# 正常评论 → 走模型（dev grok key 为占位 key，会返回 provider_auth_failed，属预期）
+MODE=sync bash scripts/smoke.sh comment t2 "这个电影真不错"
+```
+
+若账号丢失，重建：
+
+```bash
+wrangler d1 execute ai-guard-dev --remote --file=- <<'SQL'
+INSERT OR REPLACE INTO apps
+ (id, name, secret, callback_url, biz_types, rate_limit_qps, disabled, provider_strategy, created_at)
+VALUES
+ ('app_e2e_smoketest', 'e2e-smoketest (dev only)',
+  '35d500c11b50be38537f0413b91b26d19d6ee3e0f4040e19541c4569abdafda5', NULL,
+  '["comment","nickname","bio"]', 50, 0, 'auto', strftime('%s','now')*1000);
+SQL
+```
+
+> 注：dev 的 `apps` 表落后 prod（缺 `analyze_biz_types/delivery_mode/callback_max_concurrency` 列，migration 0007 未在 dev 应用）。上面 INSERT 故意只用 dev 现有列；代码读取时这些缺列走默认值。prod 做 e2e 请临时建号、测完即删，不要常驻。
+
 ## 应急场景
 
 ### ① 上游 Provider 故障

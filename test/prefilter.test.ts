@@ -101,6 +101,23 @@ describe("prefilter · applyPrefilter L2 (ad blacklist)", () => {
     expect(r.kind).toBe("reject_ad");
   });
 
+  it("catches QQ written in Chinese numerals (real-world prod case)", () => {
+    // 扣 + 中文数字拼出的 QQ 号 3410437489，规避 \d 正则
+    const r = applyPrefilter(
+      "comment",
+      "苏州求大鸡爸爸操死我。扣。三十四亿一千零四十三万七千四百八十九",
+    );
+    expect(r.kind).toBe("reject_ad");
+    expect(r.result?.categories).toEqual(["ad"]);
+    expect(r.tag).toContain("cn_numeral_contact");
+  });
+
+  it("catches 微信 + Chinese-numeral account", () => {
+    expect(
+      applyPrefilter("bio", "微信一三八零零一三八零零零").kind,
+    ).toBe("reject_ad");
+  });
+
   it("catches Telegram", () => {
     const r = applyPrefilter("bio", "telegram @happyguy2024");
     expect(r.kind).toBe("reject_ad");
@@ -125,6 +142,13 @@ describe("prefilter · applyPrefilter L2 (ad blacklist)", () => {
     expect(applyPrefilter("comment", "刚洗完澡 全裸一张").kind).toBe("skip");
     expect(applyPrefilter("comment", "1 求约 183/75 今晚在家").kind).toBe("skip");
     expect(applyPrefilter("bio", "肌肉熊 183 找长期").kind).toBe("skip");
+  });
+
+  it("does NOT false-positive on short Chinese-numeral phrases", () => {
+    // 短中文数字串（年份/金额/口语）不应触发 cn_numeral_contact
+    expect(applyPrefilter("comment", "二〇二四年加油").kind).toBe("skip");
+    expect(applyPrefilter("comment", "千万不要错过").kind).toBe("skip");
+    expect(applyPrefilter("comment", "我加了三万块").kind).toBe("skip");
   });
 });
 
