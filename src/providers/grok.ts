@@ -90,6 +90,32 @@ export function createGrokAdapter(env: Env): ProviderAdapter {
       const latencyMs = Date.now() - startedAt;
       if (!res.ok) {
         const text = await safeText(res);
+        // xAI 对「输入内容」做安全前置检查；命中(如 CSAM)直接 403 permission-denied，
+        //   body 含 "Failed check: SAFETY_CHECK_TYPE_*"，且**不返回**模型结论。
+        //   这是「内容违规」而非「鉴权失败」：必须 fail-closed 判 reject，且绝不能走
+        //   AUTH_FAILED——否则一条 CSAM 评论就会被误判成 key 失效，触发凭证告警 + 熔断拉闸全站。
+        const block = classifyXaiSafetyBlock(res.status, text);
+        if (block) {
+          const verdict: Record<string, unknown> = {
+            status: "reject",
+            risk_level: "high",
+            categories: [block.category],
+            reason: block.reason,
+          };
+          // post/avatar 走 labels 契约时补一条命中标签（仅已知类型，如 csam）。
+          if (block.labelCategory && (args.isImage || hasMultiImage)) {
+            verdict.labels = [
+              { category: block.labelCategory, detected: true, confidence: 1, evidence: block.reason },
+            ];
+          }
+          return {
+            rawText: JSON.stringify(verdict),
+            model,
+            inputTokens: 0,
+            outputTokens: 0,
+            latencyMs,
+          };
+        }
         // 401/403 = key 无效 / 被禁 / 没权限 — 升级为 AUTH_FAILED。
         // xAI 还会把「无效 API key」返成 400 invalid-argument（body 含 "Incorrect API key"），
         // 同样视为鉴权失败，否则 key 真失效时只标 PROVIDER_ERROR、不触发凭证告警 + 熔断。
@@ -137,4 +163,26 @@ async function safeText(res: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/**
+ * 识别 xAI 输入安全检查拦截（403 permission-denied，body 含 SAFETY_CHECK_TYPE_*）。
+ * 与鉴权失败区分：命中返回 fail-closed reject 的分类；未命中返回 null（交回原 auth/error 分类）。
+ * 实测 body 形如：{"code":"permission-denied","error":"Content violates usage guidelines. ...
+ *   Failed check: SAFETY_CHECK_TYPE_CSAM"}
+ * `category` 取 schema 的 Category 值，`labelCategory` 取 LabelCategory 值（无对应则 null）。
+ */
+export function classifyXaiSafetyBlock(
+  status: number,
+  body: string,
+): { category: string; labelCategory: string | null; reason: string } | null {
+  if (status !== 403) return null;
+  if (!/permission-denied|content violates usage guidelines|SAFETY_CHECK_TYPE/i.test(body)) {
+    return null;
+  }
+  const type = body.match(/SAFETY_CHECK_TYPE_([A-Z_]+)/)?.[1] ?? "UNKNOWN";
+  if (type === "CSAM") {
+    return { category: "porn", labelCategory: "csam", reason: "上游安全检查拦截：疑似 CSAM（未成年性化）" };
+  }
+  return { category: "other", labelCategory: null, reason: `上游安全检查拦截：${type}` };
 }
