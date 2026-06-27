@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import archHtml from "../docs/architecture.html";
 import { AppError, ErrorCodes } from "./lib/errors.ts";
-import { checkAndAlert, sendTelegramAlert, sendWeeklyHeartbeat } from "./alerts/telegram.ts";
+import { checkAndAlert, checkD1SizeAndAlert, sendTelegramAlert, sendWeeklyHeartbeat } from "./alerts/telegram.ts";
 import { checkProviderHealth } from "./alerts/provider-health.ts";
 import { moderateRouter } from "./routes/moderate.ts";
 import { analyzeRouter } from "./routes/analyze.ts";
@@ -406,6 +406,13 @@ async function scheduled(ev: ScheduledController, env: Env, _ctx: ExecutionConte
       if (ok) console.log("[scheduled] weekly heartbeat sent");
     } catch (e) {
       console.warn("[scheduled] heartbeat failed", e);
+    }
+    // M28: 监控 D1 size 24h 涨速。首次跑只记 snapshot，第二次起开始对比告警。
+    try {
+      const r = await checkD1SizeAndAlert(env);
+      console.log("[scheduled] d1 size:", r.checks.join(" | "), "fired:", r.fired.join(","));
+    } catch (e) {
+      console.warn("[scheduled] d1 size check failed", e);
     }
     return;
   }

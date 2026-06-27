@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { checkAndAlert, DEFAULT_THRESHOLDS } from "../src/alerts/telegram.ts";
+import { checkAndAlert, checkD1SizeAndAlert, DEFAULT_THRESHOLDS, D1_SIZE_SNAPSHOT_KV_KEY } from "../src/alerts/telegram.ts";
 
 class FakeKV {
   readonly items = new Map<string, string>();
@@ -341,3 +341,89 @@ function makeEnv(rows: ConstructorParameters<typeof FakeD1>[0]): Env {
     TELEGRAM_CHAT_ID: "chat-id",
   } as unknown as Env;
 }
+
+// =============================================================
+// M28: D1 size delta monitoring
+// =============================================================
+
+class FakeD1SizeStmt {
+  constructor(private readonly pageCount: number, private readonly pageSize: number, private readonly sql: string) {}
+  async first<T>(): Promise<T> {
+    if (this.sql.includes("page_count")) return { page_count: this.pageCount } as T;
+    if (this.sql.includes("page_size")) return { page_size: this.pageSize } as T;
+    return {} as T;
+  }
+}
+class FakeD1Size {
+  constructor(private readonly pageCount: number, private readonly pageSize: number) {}
+  prepare(sql: string): FakeD1SizeStmt { return new FakeD1SizeStmt(this.pageCount, this.pageSize, sql); }
+}
+
+function makeD1SizeEnv(opts: { pages: number; pageSize: number; kv: FakeKV }): Env {
+  return {
+    DB: new FakeD1Size(opts.pages, opts.pageSize),
+    NONCE: opts.kv,
+    DEDUP_CACHE: new FakeKV(),
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_CHAT_ID: "chat-id",
+  } as unknown as Env;
+}
+
+describe("M28 · D1 size delta monitoring", () => {
+  it("first run records snapshot without firing", async () => {
+    const sent: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)));
+      return new Response("{}", { status: 200 });
+    }));
+    const kv = new FakeKV();
+    const env = makeD1SizeEnv({ pages: 100000, pageSize: 4096, kv }); // ~400MB
+    const result = await checkD1SizeAndAlert(env);
+
+    expect(result.fired).not.toContain("d1-size-delta");
+    expect(sent).toHaveLength(0);
+    expect(kv.items.get(D1_SIZE_SNAPSHOT_KV_KEY)).toBeTruthy();
+    expect(result.checks.some((c) => c.includes("first snapshot"))).toBe(true);
+  });
+
+  it("fires warn when delta exceeds warn threshold", async () => {
+    const sent: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)));
+      return new Response("{}", { status: 200 });
+    }));
+    const kv = new FakeKV();
+    // Prior snapshot: 300MB, 25h ago
+    await kv.put(D1_SIZE_SNAPSHOT_KV_KEY, JSON.stringify({
+      size_bytes: 300 * 1024 * 1024,
+      ts_ms: Date.now() - 25 * 3600_000,
+    }));
+    // Current: 250MB more (550MB total) — beyond warn (200MB) but under crit (500MB)
+    const env = makeD1SizeEnv({ pages: 140800, pageSize: 4096, kv });
+    const result = await checkD1SizeAndAlert(env);
+
+    expect(result.fired).toContain("d1-size-delta");
+    expect((sent[0] as { text: string }).text).toContain("D1 size 涨速");
+    expect((sent[0] as { text: string }).text).toContain("ai-guard");
+  });
+
+  it("does not fire when delta below warn threshold", async () => {
+    const sent: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)));
+      return new Response("{}", { status: 200 });
+    }));
+    const kv = new FakeKV();
+    // Prior 300MB; current 360MB → +60MB delta < 200MB warn
+    await kv.put(D1_SIZE_SNAPSHOT_KV_KEY, JSON.stringify({
+      size_bytes: 300 * 1024 * 1024,
+      ts_ms: Date.now() - 24 * 3600_000,
+    }));
+    const env = makeD1SizeEnv({ pages: 92160, pageSize: 4096, kv });
+    const result = await checkD1SizeAndAlert(env);
+
+    expect(result.fired).not.toContain("d1-size-delta");
+    expect(sent).toHaveLength(0);
+    expect(result.checks.some((c) => c.includes("delta_") && c.includes("60MB"))).toBe(true);
+  });
+});

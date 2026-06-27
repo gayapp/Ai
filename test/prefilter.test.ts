@@ -128,6 +128,18 @@ describe("prefilter · applyPrefilter L2 (ad blacklist)", () => {
     expect(r.kind).toBe("reject_ad");
   });
 
+  it("catches any external http(s) link (real-world review cases)", () => {
+    expect(applyPrefilter("comment", "https://gvnl7.gay/app/library/gv/212338").kind).toBe("reject_ad");
+    expect(applyPrefilter("comment", "去 https://567.gay").kind).toBe("reject_ad");
+    const r = applyPrefilter("comment", "资源都在 http://gv4os.live/?fxid=24119905 自取");
+    expect(r.kind).toBe("reject_ad");
+    expect(r.tag).toContain("external_link");
+  });
+
+  it("does NOT treat scheme-less text as a link", () => {
+    expect(applyPrefilter("comment", "今晚一起看比赛吗 8点见").kind).toBe("skip");
+  });
+
   it("catches business intent words", () => {
     expect(applyPrefilter("nickname", "VIP门槛99").kind).toBe("reject_ad");
     expect(applyPrefilter("nickname", "专出肉小帅").kind).toBe("reject_ad");

@@ -4,6 +4,96 @@
  */
 import { BACKPRESSURE_HARD_LIMIT, PENDING_COUNT_KV_KEY } from "../analyze/backpressure.ts";
 
+/** M28: D1 size 快照（daily cron 写）；用于 24h delta 涨速告警 */
+export const D1_SIZE_SNAPSHOT_KV_KEY = "kv:d1:size-snapshot";
+
+interface D1SizeSnapshot {
+  size_bytes: number;
+  ts_ms: number;
+}
+
+/**
+ * 查 D1 size = page_count * page_size。
+ * 两个 PRAGMA 都在 D1 runtime 里返回单行。失败返 0。
+ */
+export async function getD1SizeBytes(db: D1Database): Promise<number> {
+  try {
+    const [pc, ps] = await Promise.all([
+      db.prepare("PRAGMA page_count").first<{ page_count: number }>(),
+      db.prepare("PRAGMA page_size").first<{ page_size: number }>(),
+    ]);
+    const pageCount = Number(pc?.page_count ?? 0);
+    const pageSize = Number(ps?.page_size ?? 0);
+    return pageCount * pageSize;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * M28: 比较当前 D1 size 与 KV 中 24h 前的 snapshot，超阈值告警；然后写入新 snapshot。
+ * 由 daily cron `5 0 * * *` 调用一次。首次（KV 无 snapshot）静默不告警。
+ */
+export async function checkD1SizeAndAlert(
+  env: Env,
+  thresholds: AlertThresholds = DEFAULT_THRESHOLDS,
+): Promise<{ checks: string[]; fired: string[] }> {
+  const checks: string[] = [];
+  const fired: string[] = [];
+  const now = Date.now();
+  const currentBytes = await getD1SizeBytes(env.DB);
+  if (currentBytes <= 0) {
+    checks.push("d1_size probe failed -> skip");
+    return { checks, fired };
+  }
+  const currentMB = Math.round(currentBytes / (1024 * 1024));
+
+  const rawSnap = await env.NONCE.get(D1_SIZE_SNAPSHOT_KV_KEY);
+  let prior: D1SizeSnapshot | null = null;
+  if (rawSnap) {
+    try { prior = JSON.parse(rawSnap) as D1SizeSnapshot; } catch { /* ignore */ }
+  }
+
+  if (!prior) {
+    checks.push(`d1_size first snapshot ${currentMB}MB (no baseline yet)`);
+  } else {
+    const deltaBytes = currentBytes - prior.size_bytes;
+    const deltaMB = Math.round(deltaBytes / (1024 * 1024));
+    const ageHours = Math.round((now - prior.ts_ms) / 3600_000);
+    checks.push(`d1_size=${currentMB}MB delta_${ageHours}h=${deltaMB >= 0 ? "+" : ""}${deltaMB}MB`);
+    if (deltaBytes >= thresholds.d1SizeDeltaCritBytes || deltaBytes >= thresholds.d1SizeDeltaWarnBytes) {
+      const crit = deltaBytes >= thresholds.d1SizeDeltaCritBytes;
+      const ok = await sendTelegramAlert(
+        env,
+        {
+          title: "ai-guard · D1 size 涨速告警",
+          level: crit ? "crit" : "warn",
+          lines: [
+            `当前 D1 size: ${currentMB} MB`,
+            `${ageHours}h 内增量: ${deltaMB >= 0 ? "+" : ""}${deltaMB} MB`,
+            `阈值: warn ≥ ${Math.round(thresholds.d1SizeDeltaWarnBytes / (1024 * 1024))} MB，crit ≥ ${Math.round(thresholds.d1SizeDeltaCritBytes / (1024 * 1024))} MB`,
+            ``,
+            `D1 上限 10GB。常态 IRC 流量 ~80MB/天；本次明显异常。`,
+            `排查方向：cleanup cron 是否漏表 / IRC 有否突发流量 / result_json 是否变大。`,
+            `查表大小：admin /admin/stats 或直接 D1 PRAGMA`,
+          ],
+          dedupKey: "d1-size-delta",
+          dedupTtlSeconds: 23 * 3600, // 比 24h 短一点，下次 cron 才能再触
+        },
+        env.DEDUP_CACHE,
+      );
+      if (ok) fired.push("d1-size-delta");
+    }
+  }
+
+  await env.NONCE.put(
+    D1_SIZE_SNAPSHOT_KV_KEY,
+    JSON.stringify({ size_bytes: currentBytes, ts_ms: now } satisfies D1SizeSnapshot),
+    { expirationTtl: 3 * 24 * 3600 }, // 3 天 — 容忍 cron 单次 miss 不丢 baseline
+  );
+  return { checks, fired };
+}
+
 export interface AlertContext {
   title: string;
   level: "info" | "warn" | "crit";
@@ -112,6 +202,8 @@ export interface AlertThresholds {
   analyzeSawToothMinCount: number;        // 慢请求数 ≥ 该值告警（默认 50）
   analyzePendingPoolHardLimit: number;    // M3：与 backpressure.ts 同源（final=500）
   analyzePendingPoolWarnPct: number;      // count > hardLimit*该比例 → warn 告警
+  d1SizeDeltaWarnBytes: number;           // M28：D1 size 24h 涨幅超此值告警
+  d1SizeDeltaCritBytes: number;
 }
 
 export const DEFAULT_THRESHOLDS: AlertThresholds = {
@@ -142,6 +234,10 @@ export const DEFAULT_THRESHOLDS: AlertThresholds = {
   analyzeSawToothMinCount: 50,
   analyzePendingPoolHardLimit: BACKPRESSURE_HARD_LIMIT,
   analyzePendingPoolWarnPct: 0.6,
+  // M28: IRC 上量后 avg 80MB/day，峰日 230MB（06-11）。warn 200MB / crit 500MB
+  //   给业务高峰留足空间，但避免下次"6 天涨 28x"那种 cleanup 失效场景再无人发现。
+  d1SizeDeltaWarnBytes: 200 * 1024 * 1024,
+  d1SizeDeltaCritBytes: 500 * 1024 * 1024,
 };
 
 export async function checkAndAlert(
