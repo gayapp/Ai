@@ -86,6 +86,12 @@ export const AD_RULES: AdRule[] = [
     name: "sus_tld",
     re: /https?:\/\/[^\s]+\.(top|xyz|tk|ml|cc|ga|cf)(\/|$|\s|[^a-z])/iu,
   },
+  // 任意站外链接：评论/昵称/简介里出现 http(s) URL 基本都是引流（本平台不会正常分享外链）。
+  // 线上观测到 gvnl7.gay / gv4os.live / 567.gay 等被模型降级到 review，这里确定性拦截。
+  {
+    name: "external_link",
+    re: /https?:\/\/[^\s]{3,}/iu,
+  },
   // 明确商业意图词（针对昵称/简介常见）
   {
     name: "business_intent",
