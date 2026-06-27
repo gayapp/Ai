@@ -2,7 +2,9 @@
 
 ## 一句话
 
-基于 Cloudflare Workers 的统一 AI 审核中间平台。**定位：成人男同社交 APP 的审核中间层**——合法 NSFW 内容放行，仅对 CSAM / 广告引流 / 毒品 / 赌博 / 政治敏感零容忍。对接 Grok（文本）与 Gemini（视觉），服务多个成人 APP（当前：一起看）。对外固定 JSON 契约，对内 prompt 可热更新。
+基于 Cloudflare Workers 的统一 AI 审核中间平台。**定位：成人男同社交 APP 的审核中间层**——合法 NSFW 内容放行，仅对 CSAM / 广告引流 / 毒品 / 赌博 / 政治敏感零容忍。对接 xAI Grok（文本 grok-4-fast + 视觉 grok-4），服务多个成人 APP（当前：一起看）。对外固定 JSON 契约，对内 prompt 可热更新。
+
+> 注：Gemini 已于 2026-06-04 全平台下线——所有 moderation 路由 grok-only、analyze 路由 xai-only；代码里残留的 `gemini` 枚举/配置仅为兼容历史数据。
 
 ## 目录速查
 

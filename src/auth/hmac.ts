@@ -74,12 +74,11 @@ export function verifyAdmin(env: Env, headers: Headers, url?: URL): void {
   if (!token) {
     throw new AppError(ErrorCodes.UNAUTHORIZED, 401, "missing bearer token");
   }
-  if (token.length !== expected.length) {
-    throw new AppError(ErrorCodes.UNAUTHORIZED, 401, "bad admin token");
-  }
-  let diff = 0;
-  for (let i = 0; i < token.length; i++) {
-    diff |= token.charCodeAt(i) ^ expected.charCodeAt(i);
+  // 全程常数时间比较：不因长度不同提前返回（否则泄漏 token 长度时序）。
+  // 长度差异并入 diff，迭代次数固定为 expected.length。
+  let diff = token.length ^ expected.length;
+  for (let i = 0; i < expected.length; i++) {
+    diff |= expected.charCodeAt(i) ^ (token.charCodeAt(i % token.length) || 0);
   }
   if (diff !== 0) {
     throw new AppError(ErrorCodes.UNAUTHORIZED, 401, "bad admin token");

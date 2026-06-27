@@ -196,6 +196,10 @@ moderateRouter.post("/v1/moderate", async (c) => {
       imageUrls: parsed.image_urls,
       timeoutMs,
       strategy: app.provider_strategy,
+      // 复用上面为 dedup key 已加载的 primary prompt，省一次 KV 读。
+      primaryPrompt: primaryPrompt
+        ? { version: primaryPrompt.version, content: primaryPrompt.content, provider: route.primary }
+        : undefined,
     });
   } catch (err) {
     if (err instanceof AppError && err.code === ErrorCodes.PROVIDER_TIMEOUT && parsed.mode === "auto") {
