@@ -6,7 +6,7 @@ import { listAdminAuditLogs } from "../db/admin-audit.ts";
 export const adminAuditRouter = new Hono<{ Bindings: Env }>({ strict: false });
 
 adminAuditRouter.use("*", async (c, next) => {
-  verifyAdmin(c.env, c.req.raw.headers, new URL(c.req.url));
+  verifyAdmin(c.env, c.req.raw.headers); // 仅头部鉴权（?token= 仅 evidence 路由允许）
   await next();
 });
 

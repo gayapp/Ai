@@ -18,6 +18,9 @@ export interface ExecuteArgs {
   imageUrls?: string[]; // post 多图/视频帧
   timeoutMs: number;
   strategy?: ProviderStrategy; // default 'auto'
+  // route handler 已为 dedup key 加载过 primary 的 active prompt；透传复用，省一次 KV 读。
+  // 仅当 provider 与此处 provider 匹配时复用，否则照常 loadActivePromptCached。
+  primaryPrompt?: { version: number; content: string; provider: Provider };
 }
 
 /**
@@ -101,6 +104,8 @@ function annotateProviderOnError(err: AppError, provider: Provider): AppError {
   }
   let newDetails: Record<string, unknown>;
   if (typeof d === "string") {
+    // body 仅记服务端日志，不回传客户端（publicDetails 会在序列化时丢弃 body）。
+    console.warn(`[pipeline] ${provider} upstream error body:`, d.slice(0, 500));
     newDetails = { provider, body: d };
   } else if (d && typeof d === "object") {
     newDetails = { ...(d as Record<string, unknown>), provider };
@@ -154,7 +159,10 @@ async function callProvider(
   args: ExecuteArgs,
   provider: Provider,
 ): Promise<ExecutionResult> {
-  const prompt = await loadActivePromptCached(env, args.bizType, provider);
+  const prompt =
+    args.primaryPrompt && args.primaryPrompt.provider === provider
+      ? args.primaryPrompt
+      : await loadActivePromptCached(env, args.bizType, provider);
   if (!prompt) {
     throw new AppError(
       ErrorCodes.INTERNAL,

@@ -100,10 +100,11 @@ app.onError((err, c) => {
   if (err instanceof AppError) {
     return c.json(err.toJSON(), err.status as 400 | 401 | 403 | 404 | 500);
   }
-  // zod parse errors
+  // zod parse errors — 不把 issues（含字段路径/校验规则等实现细节）回传客户端，仅记日志
   if (err && typeof err === "object" && "issues" in err) {
+    console.warn("[validation]", JSON.stringify((err as { issues: unknown }).issues));
     return c.json(
-      { error_code: ErrorCodes.INVALID_REQUEST, message: "validation failed", details: (err as { issues: unknown }).issues },
+      { error_code: ErrorCodes.INVALID_REQUEST, message: "validation failed" },
       400,
     );
   }

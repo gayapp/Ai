@@ -27,7 +27,11 @@ import { readEvidence } from "../evidence/r2.ts";
 export const adminStatsRouter = new Hono<{ Bindings: Env }>({ strict: false });
 
 adminStatsRouter.use("*", async (c, next) => {
-  verifyAdmin(c.env, c.req.raw.headers, new URL(c.req.url));
+  const url = new URL(c.req.url);
+  // 仅 evidence 取图路由允许 ?token=（供 <img src> 用，无法带 Authorization 头）；
+  // 其余 stats 子路由一律仅头部鉴权，收窄 token 在日志/referrer 的泄漏面。
+  const allowQueryToken = url.pathname.includes("/evidence/");
+  verifyAdmin(c.env, c.req.raw.headers, allowQueryToken ? url : undefined);
   await next();
 });
 
